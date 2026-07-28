@@ -360,12 +360,19 @@
 		(data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name.toUpperCase())
 	);
 
-	// Which of the CR's batches the grid is showing. '' = all of them at once.
-	// Lectures are tagged with the year batch (BIO1YR) while their tutorials and practicals
-	// are tagged with the sub-batch (BIO11 / BIO12), so picking one batch here is also how
-	// you switch which TUT/PRAC section is on the grid.
-	let batchView = $state('');
-	let viewedBatchNames = $derived(batchView ? [batchView] : crBatchNames);
+	// Which of the CR's batches the grid is showing — any combination of them.
+	// Empty set means all assigned batches. Lectures are tagged with the year batch
+	// (BIO1YR) while their tutorials and practicals are tagged with the sub-batch
+	// (BIO11 / BIO12), so this is also how you switch which TUT/PRAC sections show.
+	let batchViews = $state<Set<string>>(new Set());
+	let viewedBatchNames = $derived(batchViews.size ? [...batchViews] : crBatchNames);
+
+	function toggleBatchView(bn: string) {
+		const next = new Set(batchViews);
+		if (next.has(bn)) next.delete(bn);
+		else next.add(bn);
+		batchViews = next;
+	}
 
 	// CR timetable: all courses matching ANY viewed batch, deduped
 	function matchesCRBatch(major: string): boolean {
@@ -1112,8 +1119,8 @@
 					<div class="min-w-0">
 						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">weekly schedule</h2>
 						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">
-							{#if crBatchNames.length}
-								{crBatchNames.join(', ')} ·
+							{#if viewedBatchNames.length}
+								{viewedBatchNames.join(', ')} ·
 							{/if}
 							{crBatchCourses().length} courses
 						</p>
@@ -1206,15 +1213,16 @@
 					<div class="flex items-center gap-2">
 						<span class="shrink-0 text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">batch</span>
 						<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
-							<button onclick={() => batchView = ''}
+							<button onclick={() => batchViews = new Set()}
 								class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-								style="border-color: {!batchView ? 'var(--accent)' : 'var(--border)'}; color: {!batchView ? 'var(--accent)' : 'var(--muted)'}; background: {!batchView ? 'var(--tint)' : 'transparent'};"
+								style="border-color: {!batchViews.size ? 'var(--accent)' : 'var(--border)'}; color: {!batchViews.size ? 'var(--accent)' : 'var(--muted)'}; background: {!batchViews.size ? 'var(--tint)' : 'transparent'};"
 							>all ({crBatchNames.length})</button>
 							{#each crBatchNames as bn}
-								<button onclick={() => batchView = batchView === bn ? '' : bn}
+								{@const on = batchViews.has(bn)}
+								<button onclick={() => toggleBatchView(bn)}
 									class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-									style="border-color: {batchView === bn ? 'var(--accent)' : 'var(--border)'}; color: {batchView === bn ? 'var(--accent)' : 'var(--muted)'}; background: {batchView === bn ? 'var(--tint)' : 'transparent'};"
-								>{bn}</button>
+									style="border-color: {on ? 'var(--accent)' : 'var(--border)'}; color: {on ? 'var(--accent)' : 'var(--muted)'}; background: {on ? 'var(--tint)' : 'transparent'};"
+								>{on ? '✓ ' : ''}{bn}</button>
 							{/each}
 						</div>
 					</div>

@@ -21,6 +21,9 @@ function keyConditions(courseCode: string, component: string | null | undefined,
 // GET /api/cr/schedule — returns all overrides (keyed by courseCode+component+originalDay globally)
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
+		return json({ error: 'Forbidden' }, { status: 403 });
+	}
 	const blocks = await db.select().from(scheduleBlock);
 	return json({ blocks });
 };

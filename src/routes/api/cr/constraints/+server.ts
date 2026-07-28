@@ -6,6 +6,9 @@ import { eq } from 'drizzle-orm';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
+		return json({ error: 'Forbidden' }, { status: 403 });
+	}
 	const constraints = await db.select().from(professorConstraint);
 	return json({ constraints });
 };
