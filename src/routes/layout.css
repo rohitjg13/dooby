@@ -449,6 +449,29 @@ body {
 	animation: nood-fade-up 0.42s cubic-bezier(0.22, 0.7, 0.27, 1) both;
 }
 
+/* Self-scrolling label for timetable blocks too small for their text. The inner span is
+   sized to its content, so `100cqw - 100%` is exactly how far it overruns the block —
+   negative when it overflows, positive when it fits, and min() clamps the fitting case to
+   no movement at all. That means no JS measuring and no animation on labels that fit. */
+.tt-scroll {
+	overflow: hidden;
+	white-space: nowrap;
+	container-type: inline-size;
+}
+.tt-scroll > span {
+	display: inline-block;
+	width: max-content;
+	animation: nood-scroll-x 9s ease-in-out infinite alternate;
+}
+@keyframes nood-scroll-x {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(min(0px, calc(100cqw - 100%)));
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	* {
 		animation-duration: 0.01ms !important;

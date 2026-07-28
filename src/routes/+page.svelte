@@ -1321,17 +1321,19 @@
 														<!-- Line-height is 1.5, so lines cost 15 / 12 / 13.5 / 12px on top of 4px
 														     padding — cumulative 19 / 31 / 44.5 / 56.5. Drop lines that would spill
 														     instead of clipping them; hover or tap shows the full details. -->
-														<div class="text-[10px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};">{block.course.courseCode.split('-')[0]}</div>
+														<!-- Tracked-course blocks are pointer-events:none so drags pass through to
+														     the slot underneath, which rules out a hover tooltip — their labels
+														     scroll themselves instead. Draggable blocks keep plain truncation and
+														     use the tooltip. -->
+														<div class="text-[10px] font-medium {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};"><span>{block.course.courseCode.split('-')[0]}</span></div>
 														{#if sectionBatch(block.course) && h > 31}
-															<div class="truncate text-[8px] uppercase tracking-[0.06em]" style="color: var(--accent);">{block.course.component} · {sectionBatch(block.course)}</div>
+															<div class="text-[8px] uppercase tracking-[0.06em] {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: var(--accent);"><span>{block.course.component} · {sectionBatch(block.course)}</span></div>
 														{/if}
 														{#if h > 45}
-															<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+															<div class="text-[9px] {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: var(--muted);"><span>{block.course.courseName}</span></div>
 														{/if}
 														{#if h > 57}
-															<div class="text-[8px] truncate" style="color: var(--muted);">
-																{block.course.component ?? ''}{block.course.room ? ' • ' + block.course.room : ''}{block.course.faculty ? ' • ' + block.course.faculty : ''}
-															</div>
+															<div class="text-[8px] {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: var(--muted);"><span>{block.course.component ?? ''}{block.course.room ? ' • ' + block.course.room : ''}{block.course.faculty ? ' • ' + block.course.faculty : ''}</span></div>
 														{/if}
 													</div>
 													{/if}
