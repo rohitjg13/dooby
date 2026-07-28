@@ -75,7 +75,7 @@ async function syncBatchesFromXLSX(fetchFn: typeof fetch): Promise<void> {
 
 export const load: PageServerLoad = async ({ locals, fetch }) => {
 	if (!locals.user) throw redirect(302, '/login');
-	if (locals.user.role !== 'super_admin') throw redirect(302, '/');
+	if (locals.user.role !== 'admin') throw redirect(302, '/');
 
 	// Auto-sync batches from XLSX on every load
 	await syncBatchesFromXLSX(fetch);
@@ -106,7 +106,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 
 export const actions: Actions = {
 	assignCr: async ({ request, locals }) => {
-		if (!locals.user || locals.user.role !== 'super_admin') return fail(403, { error: 'Forbidden' });
+		if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'Forbidden' });
 
 		const data = await request.formData();
 		const email = (data.get('email') as string)?.trim().toLowerCase();
@@ -140,7 +140,7 @@ export const actions: Actions = {
 	},
 
 	removeCr: async ({ request, locals }) => {
-		if (!locals.user || locals.user.role !== 'super_admin') return fail(403, { error: 'Forbidden' });
+		if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'Forbidden' });
 
 		const data = await request.formData();
 		const assignmentId = data.get('assignmentId') as string;

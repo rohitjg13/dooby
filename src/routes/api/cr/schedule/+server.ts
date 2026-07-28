@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 // Body: { courseCode, component, originalDay, batch, day, startTime, endTime, courseName, faculty, room }
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
@@ -75,7 +75,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 // single override (restore to XLSX original); with no body clears all overrides
 export const DELETE: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 	const body = await request.json().catch(() => ({}));

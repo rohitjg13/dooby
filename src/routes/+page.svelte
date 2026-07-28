@@ -7,7 +7,7 @@
 	let { data } = $props();
 
 	const isCR = data.user.role === 'cr';
-	const isSuperAdmin = data.user.role === 'super_admin';
+	const isSuperAdmin = data.user.role === 'admin';
 	const canManage = isCR || isSuperAdmin;
 	const globalTop5: { code: string; total: number }[] = data.globalTop5 ?? [];
 
@@ -1004,7 +1004,7 @@
 		<div class="flex items-center gap-2.5">
 			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">n</span>
 			<span class="title-md" style="font-size: 1.35rem;">noodle</span>
-			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role === 'super_admin' ? 'admin' : data.user.role}</span>
+			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role === 'admin' ? 'admin' : data.user.role}</span>
 		</div>
 		<div class="flex items-center gap-2 md:gap-3">
 			{#if canManage}

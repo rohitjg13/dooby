@@ -1,4 +1,4 @@
-// Course types (ported from Scooby)
+// Course types (parsed from the timetable XLSX)
 export interface Course {
 	sno: number;
 	courseCode: string;
@@ -162,9 +162,4 @@ export function countConflicts(
 		}
 	}
 	return counts;
-}
-
-// Priority score calculation
-export function calculatePriorityScore(p1: number, p2: number, p3: number): number {
-	return p1 * 3 + p2 * 2 + p3 * 1;
 }

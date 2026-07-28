@@ -1,28 +1,24 @@
 export * from './auth.schema';
 export * from './app.schema';
 
-import { pgTable, text, integer, boolean, timestamp, index, serial } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, timestamp, index, serial, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { user } from './auth.schema';
 
-// Student preferences (minor + 3 ranked UWEs)
-export const studentPreference = pgTable('student_preference', {
+// Courses a CR has manually added to watch (searched from the timetable file).
+// courseCode is the base code, e.g. "ECE204" — components are matched by prefix.
+export const crCourse = pgTable('cr_course', {
 	id: serial('id').primaryKey(),
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id, { onDelete: 'cascade' }),
-	batch: text('batch'),
-	minor: text('minor'),
-	uwePref1: text('uwe_pref_1'),
-	uwePref2: text('uwe_pref_2'),
-	uwePref3: text('uwe_pref_3'),
-	locked: boolean('locked').default(false).notNull(),
-	submittedAt: timestamp('submitted_at').defaultNow().notNull(),
-	updatedAt: timestamp('updated_at')
-		.defaultNow()
-		.$onUpdate(() => new Date())
-		.notNull()
-}, (table) => [index('pref_userId_idx').on(table.userId)]);
+	courseCode: text('course_code').notNull(),
+	courseName: text('course_name'),
+	addedAt: timestamp('added_at').defaultNow().notNull()
+}, (table) => [
+	index('cr_course_userId_idx').on(table.userId),
+	unique('cr_course_user_code_uniq').on(table.userId, table.courseCode)
+]);
 
 // Schedule blocks (timetable positions, modifiable by CR)
 export const scheduleBlock = pgTable('schedule_block', {
@@ -58,6 +54,6 @@ export const professorConstraint = pgTable('professor_constraint', {
 });
 
 // Relations
-export const studentPreferenceRelations = relations(studentPreference, ({ one }) => ({
-	user: one(user, { fields: [studentPreference.userId], references: [user.id] })
+export const crCourseRelations = relations(crCourse, ({ one }) => ({
+	user: one(user, { fields: [crCourse.userId], references: [user.id] })
 }));

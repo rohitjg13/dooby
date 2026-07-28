@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
@@ -33,7 +33,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 export const DELETE: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
+	if (locals.user.role !== 'cr' && locals.user.role !== 'admin') {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 

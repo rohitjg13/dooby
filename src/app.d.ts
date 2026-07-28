@@ -1,6 +1,6 @@
 import type { Session } from 'better-auth/minimal';
 
-export type UserRole = 'student' | 'cr' | 'super_admin';
+export type UserRole = 'pending' | 'cr' | 'admin';
 
 export interface AppUser {
 	id: string;
