@@ -360,11 +360,26 @@
 		(data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name.toUpperCase())
 	);
 
-	// CR timetable: all courses matching ANY assigned batch, deduped
+	// Which of the CR's batches the grid is showing. '' = all of them at once.
+	// Lectures are tagged with the year batch (BIO1YR) while their tutorials and practicals
+	// are tagged with the sub-batch (BIO11 / BIO12), so picking one batch here is also how
+	// you switch which TUT/PRAC section is on the grid.
+	let batchView = $state('');
+	let viewedBatchNames = $derived(batchView ? [batchView] : crBatchNames);
+
+	// CR timetable: all courses matching ANY viewed batch, deduped
 	function matchesCRBatch(major: string): boolean {
-		if (!major || !crBatchNames.length) return false;
+		if (!major || !viewedBatchNames.length) return false;
 		const majors = major.toUpperCase().split(/[\s,]+/);
-		return crBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
+		return viewedBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
+	}
+
+	// TUT/PRAC rows belong to a specific sub-batch — label the block with it so two
+	// practicals of the same course are tellable apart when viewing all batches.
+	function sectionBatch(c: Course): string {
+		const comp = (c.component ?? '').toUpperCase();
+		if (!comp.startsWith('TUT') && !comp.startsWith('PRAC')) return '';
+		return (c.major || '').trim().toUpperCase();
 	}
 
 	// Deduplicated batch courses (overrides applied per day-slot in calendarBlocks)
@@ -1186,6 +1201,25 @@
 					{/if}
 				</div>
 
+				<!-- Batch view switcher — one batch at a time, or all together -->
+				{#if crBatchNames.length > 1}
+					<div class="flex items-center gap-2">
+						<span class="shrink-0 text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">batch</span>
+						<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
+							<button onclick={() => batchView = ''}
+								class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+								style="border-color: {!batchView ? 'var(--accent)' : 'var(--border)'}; color: {!batchView ? 'var(--accent)' : 'var(--muted)'}; background: {!batchView ? 'var(--tint)' : 'transparent'};"
+							>all ({crBatchNames.length})</button>
+							{#each crBatchNames as bn}
+								<button onclick={() => batchView = batchView === bn ? '' : bn}
+									class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+									style="border-color: {batchView === bn ? 'var(--accent)' : 'var(--border)'}; color: {batchView === bn ? 'var(--accent)' : 'var(--muted)'}; background: {batchView === bn ? 'var(--tint)' : 'transparent'};"
+								>{bn}</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
 				<!-- Dept filter chips -->
 				{#if ttDepts.length > 1}
 					<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
@@ -1260,6 +1294,9 @@
 															</div>
 														{/if}
 														<div class="text-[10px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};">{block.course.courseCode.split('-')[0]}</div>
+														{#if sectionBatch(block.course)}
+															<div class="truncate text-[8px] uppercase tracking-[0.06em]" style="color: var(--accent);">{block.course.component} · {sectionBatch(block.course)}</div>
+														{/if}
 														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
 														{#if h > 32}
 															<div class="text-[8px] truncate" style="color: var(--muted);">
