@@ -401,9 +401,15 @@
 		].filter(Boolean).join(' · ');
 	}
 
-	function blockTitle(c: Course, violation: string | null): string {
-		const base = blockDetails(c);
-		return violation ? `${base}\n⚠ Prof. ${violation} has a constraint at this time` : base;
+	// Hover card for timetable blocks. One shared element positioned at the cursor rather
+	// than a child of the block, which would be clipped by the block's own overflow:hidden.
+	let hoverInfo = $state<{ text: string; warn: string | null; x: number; y: number } | null>(null);
+
+	function hoverAt(e: MouseEvent, c: Course, warn: string | null) {
+		// Flip the card to the other side of the cursor near the viewport edge
+		const x = e.clientX + 360 > window.innerWidth ? e.clientX - 350 : e.clientX + 14;
+		const y = e.clientY + 110 > window.innerHeight ? e.clientY - 100 : e.clientY + 16;
+		hoverInfo = { text: blockDetails(c), warn, x: Math.max(8, x), y: Math.max(8, y) };
 	}
 
 	// Deduplicated batch courses (overrides applied per day-slot in calendarBlocks)
@@ -1307,12 +1313,14 @@
 													{#if !block.isUWE || uweIdx === activeUweIdx}
 													<div role="button" tabindex="0"
 														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE ? 'cursor-pointer left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
-														title={blockTitle(block.course, violation)}
+														onmouseenter={(e) => hoverAt(e, block.course, violation)}
+														onmousemove={(e) => hoverAt(e, block.course, violation)}
+														onmouseleave={() => (hoverInfo = null)}
 														style="top: {top}px; height: {h}px; min-height: 20px; background: {violation ? tColors.red + '1f' : block.isUWE ? 'var(--tint-strong)' : 'var(--block)'}; border: 1px solid {violation ? tColors.red : block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {violation ? 'border-left: 3px solid ' + tColors.red + ';' : block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
 														draggable={!block.isUWE}
 														ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}
 														ontouchstart={(e) => { if (!block.isUWE) onTouchStart(e, block.course, block.originalDay, block.isUWE); }}
-														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); else showToast(blockDetails(block.course)); }}>
+														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); }}>
 														{#if block.isUWE && uweGroup.length > 1}
 															<div style="position: absolute; top: 2px; right: 2px; background: {level ? tColors[level] : 'var(--muted)'}; color: #000; border-radius: 3px; padding: 0 3px; font-size: 7px; font-weight: 700; line-height: 12px; letter-spacing: 0.03em; pointer-events: none;">
 																{activeUweIdx + 1}/{uweGroup.length}
@@ -1589,10 +1597,10 @@
 												{#each browseBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
 													{@const top = ((block.startMin - hStart) / 60) * 100}
 													{@const h = ((block.endMin - block.startMin) / 60) * 56}
-													<div role="button" tabindex="0" class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
-														title={blockDetails(block.course)}
-														onclick={() => showToast(blockDetails(block.course))}
-														onkeydown={(e) => { if (e.key === 'Enter') showToast(blockDetails(block.course)); }}
+													<div role="note" class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
+														onmouseenter={(e) => hoverAt(e, block.course, null)}
+														onmousemove={(e) => hoverAt(e, block.course, null)}
+														onmouseleave={() => (hoverInfo = null)}
 														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--block); border: 1px solid var(--border);">
 														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
 														{#if sectionBatch(block.course) && h > 31}
@@ -1621,6 +1629,17 @@
 			</div>
 		{/if}
 	</main>
+	{/if}
+
+	<!-- Hover card for timetable blocks -->
+	{#if hoverInfo}
+		<div class="pointer-events-none fixed z-[60] max-w-[21rem] rounded-lg px-3 py-2 text-xs leading-relaxed"
+			style="left: {hoverInfo.x}px; top: {hoverInfo.y}px; background: var(--surface); border: 1px solid var(--border); color: var(--fg); box-shadow: var(--shadow-lg);">
+			{hoverInfo.text}
+			{#if hoverInfo.warn}
+				<div class="mt-1" style="color: #ef4444;">⚠ Prof. {hoverInfo.warn} has a constraint at this time</div>
+			{/if}
+		</div>
 	{/if}
 
 	<!-- Toast -->
