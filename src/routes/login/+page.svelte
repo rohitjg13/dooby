@@ -26,7 +26,7 @@
 	<main class="animate-in relative z-10 flex w-full max-w-sm flex-col items-center text-center">
 		<span class="eyebrow mb-6">Class rep timetable planner</span>
 
-		<h1 class="title-xl" style="font-size: clamp(3rem, 12vw, 4rem);">dooby</h1>
+		<h1 class="wordmark" style="font-size: clamp(3rem, 12vw, 4rem);">dooby</h1>
 
 		<p class="hint mt-4 max-w-xs" style="font-size: 0.9rem;">
 			Track the courses your batch cares about, spot clashes before they happen,

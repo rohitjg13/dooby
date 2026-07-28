@@ -18,7 +18,7 @@
 	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
 		<a href="/" class="flex items-center gap-2.5 no-underline">
 			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">d</span>
-			<span class="title-md" style="font-size: 1.35rem;">dooby</span>
+			<span class="wordmark" style="font-size: 1.35rem;">dooby</span>
 			<span class="badge ml-1">admin</span>
 		</a>
 		<div class="flex items-center gap-3">

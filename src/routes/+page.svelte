@@ -19,6 +19,7 @@
 	// This CR's manually added courses
 	let myCourses = $state<{ courseCode: string; courseName: string | null }[]>(data.myCourses ?? []);
 	let search = $state('');
+	let searchOpen = $state(false);
 	let addingCode = $state('');
 
 	// Constraints
@@ -477,7 +478,19 @@
 		return `${Math.floor(hours / 24)}d ago`;
 	}
 
-	// Watch-list ordering, shared by the courses table and the overlay chips
+	// Headline tally for the courses tab — the question a CR opens the page with
+	let trackedSummary = $derived(() => {
+		let clear = 0, overlap = 0, clash = 0;
+		for (const c of myCourses) {
+			const lvl = adjustedConflictMap().get(c.courseCode) ?? getTrafficLight(c.courseCode);
+			if (lvl === 'red') clash++;
+			else if (lvl === 'yellow') overlap++;
+			else clear++;
+		}
+		return { clear, overlap, clash };
+	});
+
+	// Watch-list ordering, shared by the courses list and the overlay chips
 	let listSort = $state<'course' | 'conflict'>('course');
 	let sortedMyCourses = $derived(() => {
 		const list = [...myCourses];
@@ -952,7 +965,7 @@
 	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
 		<div class="flex items-center gap-2.5">
 			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">d</span>
-			<span class="title-md" style="font-size: 1.35rem;">dooby</span>
+			<span class="wordmark" style="font-size: 1.35rem;">dooby</span>
 			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role}</span>
 		</div>
 		<div class="flex items-center gap-2 md:gap-3">
@@ -1009,128 +1022,124 @@
 					</div>
 				{/if}
 
-				<div class="flex flex-col gap-1">
-					<h1 class="title-xl">Courses you're tracking</h1>
-					<p class="hint">Search the timetable and add any course you care about. Added courses overlay onto your weekly grid and show whether they clash with your batch.</p>
-				</div>
-
-				<!-- Search + add -->
-				<div class="card card-pad flex flex-col gap-3">
-					<label for="course-search" class="field-label">Add a course <span style="color: var(--muted); font-weight: 400;">— search by code or name</span></label>
-					<input id="course-search" bind:value={search} placeholder="e.g. ECE204 or Signals" autocomplete="off" class="input" />
-					{#if loadingCourses}
-						<p class="hint animate-pulse">Loading courses…</p>
-					{:else if search.trim().length >= 2}
-						{#if searchResults().length}
-							<div class="flex flex-col" style="max-height: 20rem; overflow-y: auto;">
-								{#each searchResults() as r}
-									{@const level = getTrafficLight(r.code)}
-									<div class="flex items-center gap-3 px-1 py-2" style="border-bottom: 1px solid var(--border);">
-										<span class="inline-block h-2 w-2 shrink-0 rounded-full" style="background: {tColors[level]};"></span>
-										<div class="min-w-0 flex-1">
-											<div class="truncate text-sm font-medium" style="color: var(--fg);">{r.code}</div>
-											<div class="truncate text-xs" style="color: var(--muted);">{r.name}</div>
-										</div>
-										{#if r.watched}
-											<span class="badge shrink-0">added</span>
-										{:else}
-											<button onclick={() => addCourse(r.code, r.name)} disabled={addingCode === r.code} class="btn btn-primary btn-sm shrink-0">
-												{addingCode === r.code ? 'adding…' : '+ add'}
-											</button>
-										{/if}
-									</div>
+				<!-- Title + tally on the left, one compact search field on the right -->
+				<div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+					<div class="flex min-w-0 flex-col gap-1.5">
+						<h1 class="title-xl">Courses you're tracking</h1>
+						{#if myCourses.length}
+							<div class="nood-mono flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] uppercase tracking-[0.08em]" style="color: var(--muted);">
+								<span style="color: var(--fg);">{myCourses.length} tracked</span>
+								{#each [[trackedSummary().clear, 'clear', tColors.green], [trackedSummary().overlap, 'tutorial overlap', tColors.yellow], [trackedSummary().clash, 'lecture clash', tColors.red]] as [n, label, color]}
+									{#if n}
+										<span class="flex items-center gap-1.5"><span class="inline-block h-1.5 w-1.5 rounded-full" style="background: {color};"></span>{n} {label}</span>
+									{/if}
 								{/each}
 							</div>
 						{:else}
-							<p class="hint">No course matches “{search.trim()}”.</p>
+							<p class="hint">Add the courses you care about — they overlay on your grid and flag clashes.</p>
 						{/if}
-					{:else}
-						<p class="hint">Type at least 2 characters to search.</p>
-					{/if}
-				</div>
+					</div>
 
-				<!-- Watch list -->
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<h2 class="title-md">Your list ({myCourses.length})</h2>
-					<div class="flex gap-1.5">
-						{#each [['course', 'by course'], ['conflict', 'least conflict']] as [mode, label]}
-							<button onclick={() => listSort = mode as 'course' | 'conflict'}
-								class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-								style="border-color: {listSort === mode ? 'var(--accent)' : 'var(--border)'}; color: {listSort === mode ? 'var(--accent)' : 'var(--muted)'}; background: {listSort === mode ? 'var(--tint)' : 'transparent'};"
-							>{label}</button>
-						{/each}
+					<div class="relative w-full max-w-[19rem]">
+						<input
+							id="course-search"
+							bind:value={search}
+							oninput={() => (searchOpen = true)}
+							onfocus={() => (searchOpen = true)}
+							onblur={() => setTimeout(() => (searchOpen = false), 150)}
+							placeholder="add a course — code or name"
+							autocomplete="off"
+							class="input"
+						/>
+						{#if searchOpen && search.trim().length >= 2}
+							<div class="card absolute left-0 top-full z-20 mt-1 max-h-[22rem] w-full overflow-y-auto p-1" style="box-shadow: var(--shadow-lg);">
+								{#if loadingCourses}
+									<p class="hint animate-pulse px-2.5 py-2">Loading courses…</p>
+								{:else if searchResults().length}
+									{#each searchResults() as r}
+										{@const level = getTrafficLight(r.code)}
+										<button
+											disabled={r.watched || addingCode === r.code}
+											onmousedown={() => addCourse(r.code, r.name)}
+											ontouchstart={() => addCourse(r.code, r.name)}
+											class="flex w-full items-center gap-2.5 rounded-md border-none bg-transparent px-2.5 py-2 text-left transition-colors duration-100 disabled:opacity-45"
+											style="cursor: {r.watched ? 'default' : 'pointer'};"
+											onmouseenter={(e) => { if (!r.watched) e.currentTarget.style.background = 'var(--tint)'; }}
+											onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+										>
+											<span class="inline-block h-2 w-2 shrink-0 rounded-full" style="background: {tColors[level]};"></span>
+											<span class="min-w-0 flex-1">
+												<span class="nood-mono block truncate text-xs font-medium" style="color: var(--fg);">{r.code}</span>
+												<span class="block truncate text-xs" style="color: var(--muted);">{r.name}</span>
+											</span>
+											<span class="eyebrow shrink-0" style="font-size: 0.56rem;">{r.watched ? 'added' : addingCode === r.code ? 'adding…' : '+ add'}</span>
+										</button>
+									{/each}
+								{:else}
+									<p class="hint px-2.5 py-2">Nothing matches “{search.trim()}”.</p>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				</div>
 
 				{#if !myCourses.length}
-					<div class="card card-pad text-center" style="border-style: dashed;">
-						<p class="hint">Nothing tracked yet — search above and add your first course.</p>
+					<div class="flex flex-col items-center gap-1.5 px-4 py-16 text-center" style="border: 1px dashed var(--border); border-radius: var(--radius);">
+						<p class="hint" style="color: var(--fg);">No courses tracked yet</p>
+						<p class="hint">Search above — start with the electives your batch keeps asking about.</p>
 					</div>
 				{:else}
-					<div class="card nood-mono overflow-x-auto">
-						<table class="w-full min-w-[540px] text-left text-sm" style="border-collapse: collapse;">
-							<thead>
-								<tr style="border-bottom: 1px solid var(--border);">
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">course</th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">conflicts</th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">status</th>
-									<th class="px-4 py-3"><span class="sr-only">actions</span></th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each sortedMyCourses() as item}
-									{@const level = getTrafficLight(item.courseCode)}
-									{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
-									{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
-									{@const conf = courseConflicts().get(item.courseCode)}
-									<tr style="border-bottom: 1px solid var(--border);">
-										<td class="px-3 py-2.5">
-											<span class="font-medium" style="color: var(--fg);">{item.courseCode}</span>
-											{#if item.courseName}<span class="ml-2 hidden text-[9px] md:inline" style="color: var(--muted);">{item.courseName}</span>{/if}
-										</td>
-										<td class="px-3 py-2.5 whitespace-nowrap">
-											{#if conf && conf.score > 0}
-												{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}
-												{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);"> · </span>{/if}
-												{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
-											{:else}
-												<span class="inline-block h-2 w-2 rounded-full" style="background: {tColors.green};"></span>
-											{/if}
-										</td>
-										<td class="px-3 py-2.5">
-											<div class="flex flex-wrap items-center gap-2">
-												<span class="inline-block h-2 w-2 rounded-full" style="background: {conflictCleared ? '#22c55e' : tColors[level]};"></span>
-												{#if conflictCleared}
-													<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
-												{/if}
-											</div>
-										</td>
-										<td class="px-3 py-2.5 text-right">
-											<button onclick={() => removeCourse(item.courseCode)}
-												class="cursor-pointer border-none bg-transparent text-xs transition-colors"
-												style="color: var(--muted);"
-												onmouseenter={(e) => { e.currentTarget.style.color = 'var(--danger)'; }}
-												onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-											>remove</button>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
+					<div class="flex items-center justify-between gap-3">
+						<span class="eyebrow">your list</span>
+						<div class="flex gap-1.5">
+							{#each [['course', 'by course'], ['conflict', 'least conflict']] as [mode, label]}
+								<button onclick={() => listSort = mode as 'course' | 'conflict'}
+									class="chip {listSort === mode ? 'chip-active' : ''}">{label}</button>
+							{/each}
+						</div>
 					</div>
 
-					<!-- Legend -->
-					<div class="flex flex-wrap gap-4 pt-3" style="border-top: 1px solid var(--border);">
-						{#each [['#22c55e', 'no conflict'], ['#eab308', 'tutorial overlap'], ['#ef4444', 'lecture conflict']] as [color, label]}
-							<div class="flex items-center gap-1.5">
-								<span class="inline-block h-1.5 w-1.5 rounded-full" style="background: {color};"></span>
-								<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">{label}</span>
+					<!-- One row per course. The left rule carries the conflict level, so the list
+					     reads as a severity column before you read a single word. -->
+					<div class="flex flex-col gap-1.5">
+						{#each sortedMyCourses() as item}
+							{@const level = getTrafficLight(item.courseCode)}
+							{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
+							{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
+							{@const conf = courseConflicts().get(item.courseCode)}
+							<div class="card flex items-center gap-3 px-3.5 py-2.5" style="border-left: 3px solid {tColors[adjustedLevel]};">
+								<div class="min-w-0 flex-1">
+									<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+										<span class="nood-mono text-sm font-medium" style="color: var(--fg);">{item.courseCode}</span>
+										{#if conflictCleared}
+											<span class="badge" style="color: {tColors.green}; border-color: color-mix(in srgb, {tColors.green} 45%, var(--border)); background: color-mix(in srgb, {tColors.green} 8%, transparent);">cleared by your moves</span>
+										{/if}
+									</div>
+									{#if item.courseName}
+										<p class="truncate text-xs" style="color: var(--muted);">{item.courseName}</p>
+									{/if}
+								</div>
+								<div class="nood-mono shrink-0 whitespace-nowrap text-xs">
+									{#if conf && conf.score > 0}
+										{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);"> · </span>{/if}{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
+									{:else}
+										<span class="text-[10px] uppercase tracking-[0.08em]" style="color: var(--muted);">no clash</span>
+									{/if}
+								</div>
+								<button onclick={() => removeCourse(item.courseCode)} aria-label="Remove {item.courseCode}"
+									class="shrink-0 cursor-pointer border-none bg-transparent px-1 text-base leading-none transition-colors"
+									style="color: var(--muted);"
+									onmouseenter={(e) => { e.currentTarget.style.color = 'var(--danger)'; }}
+									onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+								>&times;</button>
 							</div>
 						{/each}
-						<div class="flex items-center gap-1.5">
-							<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
-							<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">cr moved this slot</span>
-						</div>
+					</div>
+
+					<div class="nood-mono flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-[10px] uppercase tracking-[0.08em]" style="color: var(--muted);">
+						<span>R = lecture clash</span>
+						<span>Y = tutorial overlap</span>
+						<span>counted against your selected batches</span>
 					</div>
 				{/if}
 			</div>
@@ -1140,7 +1149,7 @@
 			<div class="nood-mono flex flex-col gap-5">
 				<div class="flex flex-wrap items-start justify-between gap-2">
 					<div class="min-w-0">
-						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">weekly schedule</h2>
+						<h2 class="text-lg font-semibold" style="color: var(--accent);">weekly schedule</h2>
 						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">
 							{#if viewedBatchNames.length}
 								{viewedBatchNames.join(', ')} ·

@@ -69,8 +69,9 @@
 
 @theme {
 	--font-mono: 'IBM Plex Mono', ui-monospace, monospace;
-	--font-serif: 'Zilla Slab', 'Archivo Narrow', Georgia, serif;
-	--font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+	/* --font-serif is the wordmark face only; everything else is the sans */
+	--font-serif: 'Zilla Slab', Georgia, serif;
+	--font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 * {
@@ -120,16 +121,26 @@ body {
 }
 
 /* ============================================================
-   Type — Zilla Slab display, Hanken body, Plex Mono for data
+   Type — DM Sans throughout, Plex Mono for data, and the slab
+   kept for the wordmark alone
    ============================================================ */
+
+.wordmark {
+	font-family: var(--font-serif);
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: var(--fg);
+	line-height: 1.05;
+	margin: 0;
+}
 
 .title-xl,
 .title-md {
-	font-family: var(--font-serif);
-	font-weight: 600;
+	font-family: var(--font-sans);
+	font-weight: 700;
 	color: var(--fg);
-	letter-spacing: -0.015em;
-	line-height: 1.08;
+	letter-spacing: -0.022em;
+	line-height: 1.12;
 	margin: 0;
 }
 .title-xl {
