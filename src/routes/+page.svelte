@@ -389,6 +389,23 @@
 		return (c.major || '').trim().toUpperCase();
 	}
 
+	// Short classes get a block too small for their own name, so the full details go in a
+	// hover tooltip and — since hover doesn't exist on touch — in a toast when tapped.
+	function blockDetails(c: Course): string {
+		return [
+			`${c.courseCode.split('-')[0]} — ${c.courseName}`,
+			c.component,
+			sectionBatch(c),
+			c.room,
+			normalizeFaculty(c.faculty || '').join(', ')
+		].filter(Boolean).join(' · ');
+	}
+
+	function blockTitle(c: Course, violation: string | null): string {
+		const base = blockDetails(c);
+		return violation ? `${base}\n⚠ Prof. ${violation} has a constraint at this time` : base;
+	}
+
 	// Deduplicated batch courses (overrides applied per day-slot in calendarBlocks)
 	let crBatchCourses = $derived(() => {
 		const seen = new Set<string>();
@@ -1290,23 +1307,28 @@
 													{#if !block.isUWE || uweIdx === activeUweIdx}
 													<div role="button" tabindex="0"
 														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE && uweGroup.length > 1 ? 'cursor-pointer left-0' : block.isUWE ? 'cursor-default pointer-events-none left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
-														title={violation ? `Prof. ${violation} has a constraint at this time` : undefined}
+														title={blockTitle(block.course, violation)}
 														style="top: {top}px; height: {h}px; min-height: 20px; background: {violation ? tColors.red + '1f' : block.isUWE ? 'var(--tint-strong)' : 'var(--block)'}; border: 1px solid {violation ? tColors.red : block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {violation ? 'border-left: 3px solid ' + tColors.red + ';' : block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
 														draggable={!block.isUWE}
 														ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}
 														ontouchstart={(e) => { if (!block.isUWE) onTouchStart(e, block.course, block.originalDay, block.isUWE); }}
-														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); }}>
+														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); else showToast(blockDetails(block.course)); }}>
 														{#if block.isUWE && uweGroup.length > 1}
 															<div style="position: absolute; top: 2px; right: 2px; background: {level ? tColors[level] : 'var(--muted)'}; color: #000; border-radius: 3px; padding: 0 3px; font-size: 7px; font-weight: 700; line-height: 12px; letter-spacing: 0.03em; pointer-events: none;">
 																{activeUweIdx + 1}/{uweGroup.length}
 															</div>
 														{/if}
+														<!-- Line-height is 1.5, so lines cost 15 / 12 / 13.5 / 12px on top of 4px
+														     padding — cumulative 19 / 31 / 44.5 / 56.5. Drop lines that would spill
+														     instead of clipping them; hover or tap shows the full details. -->
 														<div class="text-[10px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};">{block.course.courseCode.split('-')[0]}</div>
-														{#if sectionBatch(block.course)}
+														{#if sectionBatch(block.course) && h > 31}
 															<div class="truncate text-[8px] uppercase tracking-[0.06em]" style="color: var(--accent);">{block.course.component} · {sectionBatch(block.course)}</div>
 														{/if}
-														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
-														{#if h > 32}
+														{#if h > 45}
+															<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+														{/if}
+														{#if h > 57}
 															<div class="text-[8px] truncate" style="color: var(--muted);">
 																{block.course.component ?? ''}{block.course.room ? ' • ' + block.course.room : ''}{block.course.faculty ? ' • ' + block.course.faculty : ''}
 															</div>
@@ -1565,11 +1587,19 @@
 												{#each browseBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
 													{@const top = ((block.startMin - hStart) / 60) * 100}
 													{@const h = ((block.endMin - block.startMin) / 60) * 56}
-													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
+													<div role="button" tabindex="0" class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
+														title={blockDetails(block.course)}
+														onclick={() => showToast(blockDetails(block.course))}
+														onkeydown={(e) => { if (e.key === 'Enter') showToast(blockDetails(block.course)); }}
 														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--block); border: 1px solid var(--border);">
 														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
-														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
-														{#if h > 32}
+														{#if sectionBatch(block.course) && h > 31}
+															<div class="truncate text-[8px] uppercase tracking-[0.06em]" style="color: var(--accent);">{block.course.component} · {sectionBatch(block.course)}</div>
+														{/if}
+														{#if h > 45}
+															<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+														{/if}
+														{#if h > 57}
 															<div class="text-[8px] truncate" style="color: var(--muted);">{block.course.room} • {block.course.faculty}</div>
 														{/if}
 													</div>
@@ -1593,7 +1623,7 @@
 
 	<!-- Toast -->
 	{#if toast}
-		<div class="animate-in fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2.5 rounded-full px-4 py-2.5 text-sm"
+		<div class="animate-in fixed bottom-6 left-1/2 z-50 flex max-w-[min(90vw,34rem)] -translate-x-1/2 items-center gap-2.5 rounded-2xl px-4 py-2.5 text-sm"
 			style="background: var(--surface); border: 1px solid var(--border); color: var(--fg); box-shadow: var(--shadow-lg);">
 			<span class="inline-block h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{toast}
 		</div>
