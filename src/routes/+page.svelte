@@ -26,8 +26,12 @@
 	let constraints = $state<{ id: number; professorName: string; day: string; startTime: string | null; endTime: string | null; allDay: boolean; reason?: string | null }[]>([]);
 	let loadingCR = $state(true);
 
-	// Notifications
+	// Notifications — seeded from the server load, then polled so a move by another CR
+	// lands without a refresh. Ids dismissed locally are held back until the server
+	// confirms, otherwise an in-flight dismissal would reappear on the next poll.
 	let notifications = $state<{ id: string; fromUserName: string; courseCode: string; message: string; createdAt: number }[]>(data.notifications ?? []);
+	let dismissedIds = new Set<string>();
+	let knownNotifIds = new Set<string>((data.notifications ?? []).map((n: { id: string }) => n.id));
 
 	// Timetable state
 	let dragCourse = $state<Course | null>(null);
@@ -623,6 +627,42 @@
 		} catch { /* ignore */ }
 	}
 
+	// Poll notifications on every tab — a CR needs to hear about someone else's move
+	// while they're on the courses list, not only while staring at the grid.
+	$effect(() => {
+		if (!canManage) return;
+		const interval = setInterval(fetchNotifications, 20000);
+		return () => clearInterval(interval);
+	});
+
+	async function fetchNotifications() {
+		try {
+			const r = await fetch('/api/notifications');
+			if (!r.ok) return;
+			const d = await r.json();
+			const rows = (d.notifications ?? [])
+				.filter((n: { id: string }) => !dismissedIds.has(n.id))
+				.map((n: { id: string; fromUserName: string; courseCode: string; message: string; createdAt: string }) => ({
+					id: n.id,
+					fromUserName: n.fromUserName,
+					courseCode: n.courseCode,
+					message: n.message,
+					createdAt: new Date(n.createdAt).getTime()
+				}));
+
+			const fresh = rows.filter((n: { id: string }) => !knownNotifIds.has(n.id));
+			notifications = rows;
+			for (const n of rows) knownNotifIds.add(n.id);
+			if (fresh.length) {
+				showToast(
+					fresh.length === 1
+						? `${fresh[0].courseCode} was moved by ${fresh[0].fromUserName}`
+						: `${fresh.length} classes were moved by other CRs`
+				);
+			}
+		} catch { /* offline or logged out — the next tick retries */ }
+	}
+
 	// Poll for live sync when timetable tab is open
 	$effect(() => {
 		if (activeTab !== 'timetable' || !canManage) return;
@@ -821,6 +861,7 @@
 	}
 
 	async function dismissNotification(id: string) {
+		dismissedIds.add(id);
 		notifications = notifications.filter((n) => n.id !== id);
 		fetch('/api/notifications', {
 			method: 'DELETE',
