@@ -1306,7 +1306,7 @@
 													{@const activeUweIdx = (uweGroupActive.get(uweKey) ?? 0) % (uweGroup.length || 1)}
 													{#if !block.isUWE || uweIdx === activeUweIdx}
 													<div role="button" tabindex="0"
-														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE && uweGroup.length > 1 ? 'cursor-pointer left-0' : block.isUWE ? 'cursor-default pointer-events-none left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
+														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE ? 'cursor-pointer left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
 														title={blockTitle(block.course, violation)}
 														style="top: {top}px; height: {h}px; min-height: 20px; background: {violation ? tColors.red + '1f' : block.isUWE ? 'var(--tint-strong)' : 'var(--block)'}; border: 1px solid {violation ? tColors.red : block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {violation ? 'border-left: 3px solid ' + tColors.red + ';' : block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
 														draggable={!block.isUWE}
@@ -1321,10 +1321,10 @@
 														<!-- Line-height is 1.5, so lines cost 15 / 12 / 13.5 / 12px on top of 4px
 														     padding — cumulative 19 / 31 / 44.5 / 56.5. Drop lines that would spill
 														     instead of clipping them; hover or tap shows the full details. -->
-														<!-- Tracked-course blocks are pointer-events:none so drags pass through to
-														     the slot underneath, which rules out a hover tooltip — their labels
-														     scroll themselves instead. Draggable blocks keep plain truncation and
-														     use the tooltip. -->
+														<!-- Tracked-course labels scroll themselves so they're readable without any
+														     interaction; they're also hoverable and tappable for the full details.
+														     Drops still land because drag events bubble to the grid cell, and core
+														     blocks sit above overlays (z-index 2 vs 1) so they stay grabbable. -->
 														<div class="text-[10px] font-medium {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};"><span>{block.course.courseCode.split('-')[0]}</span></div>
 														{#if sectionBatch(block.course) && h > 31}
 															<div class="text-[8px] uppercase tracking-[0.06em] {block.isUWE ? 'tt-scroll' : 'truncate'}" style="color: var(--accent);"><span>{block.course.component} · {sectionBatch(block.course)}</span></div>
