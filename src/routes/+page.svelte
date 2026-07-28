@@ -60,7 +60,7 @@
 	let scheduleOverrides = $state(buildOverrideMapFromArray(data.savedSchedule ?? []));
 	// XLSX original positions before any overrides
 	let xlsxOriginals = $state<Map<string, { day: string; startTime: string; endTime: string }>>(new Map());
-	let showOriginals = $state(false);
+	let showOriginals = $state(true); // ghosts of pre-move positions are on unless toggled off
 	let syncStatus = $state<'idle' | 'saving' | 'saved' | 'error' | 'polling'>('idle');
 	let lastSyncedAt = $state(0);
 	// Undo/redo history for moves — session-only, max 3 entries. Entries store absolute
