@@ -1,51 +1,28 @@
 <script lang="ts">
-	import { authClient } from '$lib/auth-client';
 	import { browser } from '$app/environment';
 	import type { Course, ConflictLevel } from '$lib/types';
 	import { parseDays, timeToMinutes, minutesToTime, getConflictLevel, countConflicts } from '$lib/types';
 
 	let { data } = $props();
 
-	const isCR = data.user.role === 'cr';
-	const isSuperAdmin = data.user.role === 'admin';
-	const canManage = isCR || isSuperAdmin;
-	const globalTop5: { code: string; total: number }[] = data.globalTop5 ?? [];
+	const isAdmin = data.user.role === 'admin';
+	const canManage = data.user.role === 'cr' || isAdmin;
+	// Courses other CRs track — drives the heads-up modal before moving a class
+	const watchCounts: { code: string; count: number }[] = data.watchCounts ?? [];
 
-	let viewAsStudent = $state(!canManage);
-	let activeTab = $state<'preferences' | 'mytimetable' | 'demand' | 'timetable' | 'settings'>(canManage ? 'demand' : 'preferences');
+	let activeTab = $state<'courses' | 'timetable' | 'settings' | 'browse'>('courses');
 
-	// Batch selection (shared between student profile + my timetable)
-	const savedBatch = data.preference?.batch ?? '';
-	const savedBatchList = savedBatch ? savedBatch.split(',').map((b: string) => b.trim()).filter(Boolean) : [];
-	let batchInputs = $state<string[]>(savedBatchList.length ? savedBatchList : ['']);
-	let batchSuggestions = $state<string[][]>(savedBatchList.length ? savedBatchList.map(() => []) : [[]]);
-	let activeSuggestionIdx = $state(-1);
-	let selectedBatches = $state<string[]>(savedBatchList);
-
-	// Student preference state
+	// Course catalogue from the timetable file
 	let courses = $state<Course[]>([]);
 	let loadingCourses = $state(true);
-	let studentBatch = $state(savedBatch); // persisted batch string from DB
-	let editingBatch = $state(!savedBatch); // show batch editor when no batch saved
-	let minor = $state(data.preference?.minor ?? '');
-	let uwePref1 = $state(data.preference?.uwePref1 ?? '');
-	let uwePref2 = $state(data.preference?.uwePref2 ?? '');
-	let uwePref3 = $state(data.preference?.uwePref3 ?? '');
-	let minorOnly = $state(!!data.preference?.minor && !data.preference?.uwePref1 && !data.preference?.uwePref2 && !data.preference?.uwePref3);
-	let locked = $state(data.preference?.locked ?? false);
-	let submitting = $state(false);
-	let batchSubmitting = $state(false);
-	let prefError = $state('');
-	let prefSuccess = $state('');
 
-	// CR state
-	let demand = $state<{ courseCode: string; p1: number; p2: number; p3: number; total: number; priorityScore: number }[]>([]);
-	let minorDemand = $state<{ minor: string; count: number }[]>([]);
+	// This CR's manually added courses
+	let myCourses = $state<{ courseCode: string; courseName: string | null }[]>(data.myCourses ?? []);
+	let search = $state('');
+	let addingCode = $state('');
+
+	// Constraints
 	let constraints = $state<{ id: number; professorName: string; day: string; startTime: string | null; endTime: string | null; allDay: boolean; reason?: string | null }[]>([]);
-	let totalStudents = $state(0);
-	let deptFilter = $state('');
-	let demandSort = $state<'conflict' | 'score' | 'total'>('conflict');
-	let demandSortDir = $state<'desc' | 'asc'>('asc'); // default: least conflict first
 	let loadingCR = $state(true);
 
 	// Notifications
@@ -54,14 +31,14 @@
 	// Timetable state
 	let dragCourse = $state<Course | null>(null);
 	let dragOriginalDay = $state('');
-	let dragIsUWE = $state(false);
+	let dragIsOverlay = $state(false);
 	let dragOffsetY = $state(0);
 	let dragOverSlot = $state<{ day: string; startMin: number } | null>(null);
 
 	// Touch drag state (mobile)
 	let touchDragCourse = $state<Course | null>(null);
 	let touchDragOriginalDay = $state('');
-	let touchDragIsUWE = $state(false);
+	let touchDragIsOverlay = $state(false);
 	let touchDragOffsetX = $state(0);
 	let touchDragOffsetY = $state(0);
 	let touchX = $state(0);
@@ -156,7 +133,11 @@
 		toastTimeout = setTimeout(() => (toast = ''), 3000);
 	}
 
-	// Batch autocomplete
+	// ---------- Browse tab: any batch's timetable, read-only ----------
+	let batchInputs = $state<string[]>(['']);
+	let batchSuggestions = $state<string[][]>([[]]);
+	let selectedBatches = $state<string[]>([]);
+
 	let allBatches = $derived(() => {
 		const set = new Set<string>();
 		courses.forEach((c) => {
@@ -198,20 +179,18 @@
 		const valid = batchInputs.map((b) => b.trim().toUpperCase()).filter(Boolean);
 		if (!valid.length) return;
 		selectedBatches = valid;
-		activeTab = 'mytimetable';
 	}
 
-	// Student timetable filtered by selected batches
-	let studentCourses = $derived(
+	let browseCourses = $derived(
 		courses.filter((c) => {
 			if (!c.major || !selectedBatches.length) return false;
 			const majors = c.major.toUpperCase().split(/[\s,]+/);
 			return selectedBatches.some((ub) => majors.some((m) => m.includes(ub) || ub.includes(m)));
 		})
 	);
-	let studentBlocks = $derived(() => {
+	let browseBlocks = $derived(() => {
 		const blocks: { course: Course; day: string; startMin: number; endMin: number }[] = [];
-		for (const c of studentCourses) {
+		for (const c of browseCourses) {
 			if (!c.day || !c.startTime || !c.endTime) continue;
 			const days = parseDays(c.day);
 			const s = timeToMinutes(c.startTime);
@@ -221,45 +200,73 @@
 		}
 		return blocks;
 	});
-	let sMinT = $derived(Math.min(...(studentBlocks().map((b) => b.startMin).length ? studentBlocks().map((b) => b.startMin) : [480])));
-	let sMaxT = $derived(Math.max(...(studentBlocks().map((b) => b.endMin).length ? studentBlocks().map((b) => b.endMin) : [1080])));
+	let sMinT = $derived(Math.min(...(browseBlocks().map((b) => b.startMin).length ? browseBlocks().map((b) => b.startMin) : [480])));
+	let sMaxT = $derived(Math.max(...(browseBlocks().map((b) => b.endMin).length ? browseBlocks().map((b) => b.endMin) : [1080])));
 	let sRMin = $derived(Math.floor(sMinT / 60) * 60);
 	let sRMax = $derived(Math.ceil(sMaxT / 60) * 60);
 	let sTotalMin = $derived(sRMax - sRMin);
 	let sTimeLabels = $derived(Array.from({ length: Math.floor(sTotalMin / 60) + 1 }, (_, i) => ({ mins: sRMin + i * 60, label: minutesToTime(sRMin + i * 60) })));
 
-	// Derived course data
-	let uweCourseOptions = $derived(
-		[...new Map(courses.filter((c) => c.openAsUWE).map((c) => [c.courseCode.split('-')[0], c])).values()]
-	);
-	let minorPrograms = $derived(
-		[...new Set(courses.filter((c) => c.courseType?.toLowerCase().includes('minor')).map((c) => c.courseName))]
-	);
-	let coreCourses = $derived(courses.filter((c) => !c.openAsUWE && c.day && c.startTime && c.endTime));
-	let uweCourses = $derived(courses.filter((c) => c.openAsUWE && c.day && c.startTime && c.endTime));
+	// ---------- Course watch list ----------
+	// Every course row that actually has a scheduled slot
+	let scheduledCourses = $derived(courses.filter((c) => c.day && c.startTime && c.endTime));
 
-	// CR batch names (all assigned batches)
-	let crBatchNames = $derived(
-		(data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name.toUpperCase())
-	);
+	// Search the timetable file — one hit per base course code
+	let searchResults = $derived(() => {
+		const q = search.trim().toUpperCase();
+		if (q.length < 2) return [];
+		const watched = new Set(myCourses.map((c) => c.courseCode));
+		const seen = new Set<string>();
+		const out: { code: string; name: string; watched: boolean }[] = [];
+		for (const c of courses) {
+			const base = c.courseCode.split('-')[0].toUpperCase();
+			if (seen.has(base)) continue;
+			if (!base.includes(q) && !(c.courseName ?? '').toUpperCase().includes(q)) continue;
+			seen.add(base);
+			out.push({ code: base, name: c.courseName, watched: watched.has(base) });
+			if (out.length >= 20) break;
+		}
+		return out;
+	});
 
-	// CR timetable: all courses matching ANY assigned batch, deduped
-	function matchesCRBatch(major: string): boolean {
-		if (!major || !crBatchNames.length) return false;
-		const majors = major.toUpperCase().split(/[\s,]+/);
-		return crBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
+	async function addCourse(code: string, name: string) {
+		if (myCourses.some((c) => c.courseCode === code)) return;
+		addingCode = code;
+		const res = await fetch('/api/cr/courses', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ courseCode: code, courseName: name })
+		});
+		addingCode = '';
+		if (!res.ok) { showToast('could not add course'); return; }
+		myCourses = [...myCourses, { courseCode: code, courseName: name }];
+		enabledCourses = new Set([...enabledCourses, code]);
+		showToast(`${code} added`);
 	}
 
-	// All scheduled rows of a UWE course (its LEC + TUT + PRAC components, and every day
-	// each meets), matched by base code and deduped by component+day+time. A student
-	// attends ALL of these, so the course's conflict is the WORST across every row —
-	// never the best. (The component is part of the full courseCode, e.g.
-	// "ART210/AMP1001-LEC1"; the base is the part before the first "-".)
-	function uweBaseRows(baseCode: string): Course[] {
+	async function removeCourse(code: string) {
+		const prev = myCourses;
+		myCourses = myCourses.filter((c) => c.courseCode !== code);
+		const next = new Set(enabledCourses);
+		next.delete(code);
+		enabledCourses = next;
+		const res = await fetch('/api/cr/courses', {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ courseCode: code })
+		});
+		if (!res.ok) { myCourses = prev; showToast('could not remove course'); }
+	}
+
+	// All scheduled rows of a course (its LEC + TUT + PRAC components, and every day each
+	// meets), matched by base code and deduped by component+day+time. A student attends ALL
+	// of these, so the course's conflict is the WORST across every row — never the best.
+	// (The component is part of the full courseCode, e.g. "ART210/AMP1001-LEC1".)
+	function courseBaseRows(baseCode: string): Course[] {
 		const rows: Course[] = [];
 		const seen = new Set<string>();
-		for (const c of uweCourses) {
-			if (c.courseCode.split('-')[0] !== baseCode) continue;
+		for (const c of scheduledCourses) {
+			if (c.courseCode.split('-')[0].toUpperCase() !== baseCode.toUpperCase()) continue;
 			const sig = `${c.component ?? ''}|${c.day}|${c.startTime}`;
 			if (seen.has(sig)) continue;
 			seen.add(sig);
@@ -269,12 +276,10 @@
 	}
 
 	function getTrafficLight(courseCode: string): ConflictLevel {
-		// For CRs, check against their batch's timetable; for students, all core courses
-		const cores = canManage ? crBatchCourses() : coreCourses;
-		const rows = uweBaseRows(courseCode);
+		const rows = courseBaseRows(courseCode);
 		if (!rows.length) return 'green';
 		// Worst conflict across every component/row of the course (don't clash with self)
-		const relevant = cores.filter((k) => k.courseCode.split('-')[0] !== courseCode);
+		const relevant = crBatchCourses().filter((k) => k.courseCode.split('-')[0].toUpperCase() !== courseCode.toUpperCase());
 		let level: ConflictLevel = 'green';
 		for (const v of rows) {
 			const l = getConflictLevel(v, relevant);
@@ -284,30 +289,21 @@
 		return level;
 	}
 
-	// Adjusted traffic light map — recomputes reactively when scheduleOverrides changes
-	// Uses overridden positions for both UWE and core courses to detect resolved conflicts
+	// Adjusted traffic light map — recomputes reactively when scheduleOverrides changes.
+	// Uses overridden positions for both the tracked course and the batch courses, so a
+	// conflict the CR has already dragged away shows as cleared.
 	let adjustedConflictMap = $derived(() => {
 		const map = new Map<string, ConflictLevel>();
-		if (!canManage || scheduleOverrides.size === 0) return map;
+		if (scheduleOverrides.size === 0) return map;
 
-		// Build adjusted core courses (CR batch courses with overrides applied)
-		const adjustedCores: Course[] = [];
-		for (const c of crBatchCourses()) {
-			const origDays = parseDays(c.day || '');
-			for (const origDay of origDays) {
-				const override = scheduleOverrides.get(`${c.courseCode}|${c.component ?? ''}|${origDay}`);
-				if (override) adjustedCores.push({ ...c, day: override.day, startTime: override.startTime, endTime: override.endTime });
-				else adjustedCores.push({ ...c, day: origDay });
-			}
-		}
+		const adjustedCores = adjustedCrCores();
 
-		for (const item of demand) {
+		for (const item of myCourses) {
 			const orig = getTrafficLight(item.courseCode);
 			if (orig === 'green') continue; // already fine, skip
-			// Worst conflict across every component/row/day-slot, with overrides applied
-			const relevant = adjustedCores.filter((k) => k.courseCode.split('-')[0] !== item.courseCode);
+			const relevant = adjustedCores.filter((k) => k.courseCode.split('-')[0].toUpperCase() !== item.courseCode.toUpperCase());
 			let level: ConflictLevel = 'green';
-			outer: for (const v of uweBaseRows(item.courseCode)) {
+			outer: for (const v of courseBaseRows(item.courseCode)) {
 				for (const slot of adjustedSlotsOf(v)) {
 					const slotLevel = getConflictLevel(slot, relevant);
 					if (slotLevel === 'red') { level = 'red'; break outer; }
@@ -338,17 +334,16 @@
 		return out;
 	});
 
-	// Conflict counts per demanded UWE: red/yellow overlaps summed over EVERY component,
+	// Conflict counts per tracked course: red/yellow overlaps summed over EVERY component,
 	// row and day-slot of the course against the CR's (override-adjusted) batch timetable.
 	// A student attends all components, so every overlap counts — none are masked.
-	let demandConflicts = $derived(() => {
+	let courseConflicts = $derived(() => {
 		const map = new Map<string, { red: number; yellow: number; score: number }>();
-		if (!canManage) return map;
 		const cores = adjustedCrCores();
-		for (const item of demand) {
-			const relevant = cores.filter((k) => k.courseCode.split('-')[0] !== item.courseCode);
+		for (const item of myCourses) {
+			const relevant = cores.filter((k) => k.courseCode.split('-')[0].toUpperCase() !== item.courseCode.toUpperCase());
 			let red = 0, yellow = 0;
-			for (const v of uweBaseRows(item.courseCode)) {
+			for (const v of courseBaseRows(item.courseCode)) {
 				for (const slot of adjustedSlotsOf(v)) {
 					const counts = countConflicts(slot, relevant);
 					red += counts.red;
@@ -360,12 +355,23 @@
 		return map;
 	});
 
+	// CR batch names (all assigned batches)
+	let crBatchNames = $derived(
+		(data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name.toUpperCase())
+	);
+
+	// CR timetable: all courses matching ANY assigned batch, deduped
+	function matchesCRBatch(major: string): boolean {
+		if (!major || !crBatchNames.length) return false;
+		const majors = major.toUpperCase().split(/[\s,]+/);
+		return crBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
+	}
+
 	// Deduplicated batch courses (overrides applied per day-slot in calendarBlocks)
 	let crBatchCourses = $derived(() => {
 		const seen = new Set<string>();
 		const result: Course[] = [];
-		for (const c of courses) {
-			if (!c.day || !c.startTime || !c.endTime) continue;
+		for (const c of scheduledCourses) {
 			if (!matchesCRBatch(c.major)) continue;
 			const dedupKey = `${c.courseCode}|${c.component ?? ''}`;
 			if (seen.has(dedupKey)) continue;
@@ -410,10 +416,9 @@
 		return blocks;
 	});
 
-	// UWE overlay system for CR timetable
-	let enabledUWEs = $state<Set<string>>(new Set());
+	// Tracked-course overlay on the CR timetable — everything added starts visible
+	let enabledCourses = $state<Set<string>>(new Set((data.myCourses ?? []).map((c: { courseCode: string }) => c.courseCode)));
 
-	// Top 3 demanded UWEs (auto-enabled)
 	// Extract dept prefix: letters before any digit/dash/space, e.g. "ECE204" → "ECE", "PHL" → "PHL"
 	function deptPrefix(code: string) { return code.match(/^[A-Z]+/i)?.[0].toUpperCase() ?? code; }
 
@@ -426,77 +431,37 @@
 		if (hours < 24) return `${hours}h ago`;
 		return `${Math.floor(hours / 24)}d ago`;
 	}
-	let demandDepts = $derived([...new Set(demand.map((d) => deptPrefix(d.courseCode)))].sort());
-	let filteredDemand = $derived(() => {
-		let items = deptFilter ? demand.filter((d) => deptPrefix(d.courseCode) === deptFilter) : demand;
-		const dir = demandSortDir === 'asc' ? -1 : 1;
-		return [...items].sort((a, b) => {
-			if (demandSort === 'conflict') {
-				const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
-				const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
-				if (ca !== cb) return dir * (cb - ca);
-				return b.priorityScore - a.priorityScore; // tie-break: most demanded first
-			}
-			return dir * (demandSort === 'total' ? b.total - a.total : b.priorityScore - a.priorityScore);
-		});
-	});
 
-	// Ordering for the timetable tab's UWE overlay section: by raw demand or by least conflict
-	let topUweMode = $state<'demand' | 'conflict'>('conflict');
-	let rankedDemand = $derived(() => {
-		if (topUweMode === 'demand') return demand;
-		return [...demand].sort((a, b) => {
-			const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
-			const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
-			if (ca !== cb) return ca - cb;
-			return b.priorityScore - a.priorityScore;
-		});
-	});
-	let topDemandedUWEs = $derived(rankedDemand().slice(0, 3).map((d) => d.courseCode));
-	// "Other demanded UWEs" list sort: by course code (groups by dept), demand, or least conflict
-	let restUweSort = $state<'course' | 'demand' | 'conflict'>('course');
-	let restDemandedUWEs = $derived(() => {
-		const rest = [...rankedDemand().slice(3)];
-		if (restUweSort === 'course') return rest.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
-		if (restUweSort === 'conflict') return rest.sort((a, b) => {
-			const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
-			const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
-			if (ca !== cb) return ca - cb;
-			return b.priorityScore - a.priorityScore;
-		});
-		return rest.sort((a, b) => b.priorityScore - a.priorityScore);
-	});
-
-	function setTopUweMode(mode: 'demand' | 'conflict') {
-		if (topUweMode === mode) return;
-		topUweMode = mode;
-		// Re-seed the overlay with the new top 3
-		enabledUWEs = new Set(rankedDemand().slice(0, 3).map((d) => d.courseCode));
-	}
-
-	// Initialize top 3 UWEs as enabled once demand AND courses load
-	// (conflict scores need course data, so seeding early would use demand order)
-	$effect(() => {
-		if (topDemandedUWEs.length > 0 && courses.length > 0 && enabledUWEs.size === 0) {
-			enabledUWEs = new Set(topDemandedUWEs);
+	// Watch-list ordering, shared by the courses table and the overlay chips
+	let listSort = $state<'course' | 'conflict'>('course');
+	let sortedMyCourses = $derived(() => {
+		const list = [...myCourses];
+		if (listSort === 'conflict') {
+			return list.sort((a, b) => {
+				const ca = courseConflicts().get(a.courseCode)?.score ?? 0;
+				const cb = courseConflicts().get(b.courseCode)?.score ?? 0;
+				if (ca !== cb) return ca - cb;
+				return a.courseCode.localeCompare(b.courseCode);
+			});
 		}
+		return list.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
 	});
 
-	function toggleUWE(code: string) {
-		const next = new Set(enabledUWEs);
+	function toggleCourseOverlay(code: string) {
+		const next = new Set(enabledCourses);
 		if (next.has(code)) next.delete(code);
 		else next.add(code);
-		enabledUWEs = next;
+		enabledCourses = next;
 	}
 
-	// UWE overlay courses — returns one entry per course (multi-day applied in calendarBlocks)
-	let uweOverlayCourses = $derived(() => {
-		if (!enabledUWEs.size) return [];
+	// Overlay course rows — one entry per row (multi-day applied in calendarBlocks)
+	let overlayCourses = $derived(() => {
+		if (!enabledCourses.size) return [];
 		const seen = new Set<string>();
 		const result: Course[] = [];
-		for (const c of uweCourses) {
-			const base = c.courseCode.split('-')[0];
-			if (!enabledUWEs.has(base)) continue;
+		for (const c of scheduledCourses) {
+			const base = c.courseCode.split('-')[0].toUpperCase();
+			if (!enabledCourses.has(base)) continue;
 			const dedupKey = `${c.courseCode}|${c.component ?? ''}`;
 			if (seen.has(dedupKey)) continue;
 			seen.add(dedupKey);
@@ -505,7 +470,7 @@
 		return result;
 	});
 
-	// Calendar — combined batch courses + UWE overlays
+	// Calendar — combined batch courses + tracked-course overlays
 	const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 	// originalDay = XLSX source day (used as override key); day = current rendered day (after override)
 	type CalBlock = { course: Course; day: string; originalDay: string; startMin: number; endMin: number; isUWE: boolean };
@@ -534,11 +499,11 @@
 		}
 
 		for (const c of crBatchCourses()) addCourse(c, false);
-		for (const c of uweOverlayCourses()) addCourse(c, true);
+		for (const c of overlayCourses()) addCourse(c, true);
 		return blocks;
 	});
 
-	// Dept filter for the CR timetable grid (separate from the demand tab's deptFilter)
+	// Dept filter for the CR timetable grid
 	let ttDeptFilter = $state('');
 	let ttDepts = $derived([...new Set(crBatchCourses().map((c) => deptPrefix(c.courseCode)))].sort());
 	let filteredCalendarBlocks = $derived(() =>
@@ -575,21 +540,16 @@
 
 	// Fetch data
 	$effect(() => {
+		if (!canManage) return;
 		fetch('/api/timetable').then((r) => r.json()).then((d) => { courses = d.courses ?? []; }).catch(() => {}).finally(() => (loadingCourses = false));
-		if (canManage) {
-			Promise.all([
-				fetch('/api/cr/demand').then((r) => r.json()),
-				fetch('/api/cr/constraints').then((r) => r.json())
-			]).then(([d, c]) => {
-				demand = d.demand ?? [];
-				minorDemand = d.minorDemand ?? [];
-				totalStudents = d.totalStudents ?? 0;
-				constraints = c.constraints ?? [];
-			}).catch(() => {}).finally(() => (loadingCR = false));
+		fetch('/api/cr/constraints')
+			.then((r) => r.json())
+			.then((c) => { constraints = c.constraints ?? []; })
+			.catch(() => {})
+			.finally(() => (loadingCR = false));
 
-			// Load saved schedule overrides (batch-independent key: courseCode|component)
-			fetchOverrides();
-		}
+		// Load saved schedule overrides (key: courseCode|component|originalDay)
+		fetchOverrides();
 	});
 
 	async function fetchOverrides() {
@@ -615,68 +575,12 @@
 		return () => clearInterval(interval);
 	});
 
-	// Student actions
-	async function saveBatch() {
-		const valid = batchInputs.map((b) => b.trim().toUpperCase()).filter(Boolean);
-		if (!valid.length) { prefError = 'Enter at least one batch code'; return; }
-		prefError = '';
-		batchSubmitting = true;
-		const batchStr = valid.join(',');
-		const res = await fetch('/api/student/preferences', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ batch: batchStr, minor, uwePref1, uwePref2, uwePref3 })
-		});
-		if (!res.ok) { const d = await res.json(); prefError = d.error || 'Failed to save batch'; batchSubmitting = false; return; }
-		studentBatch = batchStr;
-		selectedBatches = valid;
-		editingBatch = false;
-		batchSubmitting = false;
-	}
-
-	async function submitPreferences() {
-		prefError = '';
-		prefSuccess = '';
-		if (!studentBatch) { prefError = 'Set your batch first'; return; }
-		if (minorOnly) {
-			if (!minor) { prefError = 'Select a minor or uncheck minor-only'; return; }
-		} else if (!uwePref1) { prefError = 'At least your first UWE preference is required'; return; }
-		const choices = [uwePref1, uwePref2, uwePref3].filter(Boolean);
-		if (new Set(choices).size !== choices.length) { prefError = 'No duplicate UWE preferences'; return; }
-
-		submitting = true;
-		const res = await fetch('/api/student/preferences', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ batch: studentBatch, minor, uwePref1, uwePref2, uwePref3 })
-		});
-		if (!res.ok) { const d = await res.json(); prefError = d.error || 'Failed'; submitting = false; return; }
-		prefSuccess = 'preferences saved';
-		submitting = false;
-	}
-
-	let lockSubmitting = $state(false);
-
-	// UWE overlap cycling: key = "day|startMin|endMin"
+	// Overlay overlap cycling: key = "day|startMin|endMin"
 	let uweGroupActive = $state(new Map<string, number>());
 	function cycleUwe(key: string, total: number, e: MouseEvent) {
 		e.stopPropagation();
 		const cur = uweGroupActive.get(key) ?? 0;
 		uweGroupActive = new Map(uweGroupActive).set(key, (cur + 1) % total);
-	}
-
-	// CR lock/unlock all preferences
-	async function toggleLockAll() {
-		if (lockSubmitting) return;
-		lockSubmitting = true;
-		const newState = !locked;
-		const res = await fetch('/api/student/preferences/lock', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ locked: newState })
-		});
-		if (res.ok) { locked = newState; showToast(newState ? 'preferences locked' : 'preferences unlocked'); }
-		lockSubmitting = false;
 	}
 
 	// Constraint management
@@ -709,7 +613,7 @@
 	function onDragStart(e: DragEvent, course: Course, originalDay: string, isUWE: boolean) {
 		dragCourse = course;
 		dragOriginalDay = originalDay;
-		dragIsUWE = isUWE;
+		dragIsOverlay = isUWE;
 		dragOffsetY = e.offsetY;
 	}
 
@@ -719,7 +623,7 @@
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		touchDragCourse = course;
 		touchDragOriginalDay = originalDay;
-		touchDragIsUWE = isUWE;
+		touchDragIsOverlay = isUWE;
 		touchDragOffsetX = touch.clientX - rect.left;
 		touchDragOffsetY = touch.clientY - rect.top;
 		touchX = touch.clientX;
@@ -759,10 +663,10 @@
 
 		const course = touchDragCourse;
 		const origDay = touchDragOriginalDay;
-		const isUWE = touchDragIsUWE;
+		const isUWE = touchDragIsOverlay;
 		touchDragCourse = null;
 		touchDragOriginalDay = '';
-		touchDragIsUWE = false;
+		touchDragIsOverlay = false;
 		dragOverSlot = null;
 
 		if (!cell) return;
@@ -781,9 +685,9 @@
 
 		if (!isUWE) {
 			const baseCode = course.courseCode.split('-')[0].toUpperCase();
-			const hit = globalTop5.find((c) => c.code.toUpperCase() === baseCode);
+			const hit = watchCounts.find((c) => c.code.toUpperCase() === baseCode);
 			if (hit) {
-				moveWarnModal = { courseCode: hit.code, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
+				moveWarnModal = { courseCode: hit.code, count: hit.count, pending: { course, origDay, day, newStart, newEnd } };
 				return;
 			}
 		}
@@ -831,17 +735,17 @@
 
 		const course = dragCourse;
 		const origDay = dragOriginalDay;
-		const isUWE = dragIsUWE;
+		const isUWE = dragIsOverlay;
 		dragCourse = null;
 		dragOriginalDay = '';
-		dragIsUWE = false;
+		dragIsOverlay = false;
 
-		// If moving a core course that's in the global top 5 UWE demand, warn the CR first
+		// If moving a class another CR is tracking, warn first
 		if (!isUWE) {
 			const baseCode = course.courseCode.split('-')[0].toUpperCase();
-			const hit = globalTop5.find((c) => c.code.toUpperCase() === baseCode);
+			const hit = watchCounts.find((c) => c.code.toUpperCase() === baseCode);
 			if (hit) {
-				moveWarnModal = { courseCode: hit.code, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
+				moveWarnModal = { courseCode: hit.code, count: hit.count, pending: { course, origDay, day, newStart, newEnd } };
 				return; // wait for confirm/cancel
 			}
 		}
@@ -910,7 +814,7 @@
 				lastSyncedAt = Date.now();
 				syncStatus = 'saved';
 				setTimeout(() => (syncStatus = 'idle'), 2500);
-				// Notify co-managing CRs and any CR whose batch demands this course as a UWE
+				// Notify co-managing CRs and any CR tracking this course
 				fetch('/api/cr/notify', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -1002,19 +906,12 @@
 	<!-- Header -->
 	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
 		<div class="flex items-center gap-2.5">
-			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">n</span>
-			<span class="title-md" style="font-size: 1.35rem;">noodle</span>
-			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role === 'admin' ? 'admin' : data.user.role}</span>
+			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">d</span>
+			<span class="title-md" style="font-size: 1.35rem;">dooby</span>
+			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role}</span>
 		</div>
 		<div class="flex items-center gap-2 md:gap-3">
-			{#if canManage}
-				<button onclick={() => { viewAsStudent = !viewAsStudent; if (viewAsStudent) activeTab = 'preferences'; else activeTab = 'demand'; }}
-					class="btn btn-ghost btn-sm" title="Switch between student and CR views">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>
-					<span class="hidden sm:inline">{viewAsStudent ? 'CR view' : 'Student view'}</span>
-				</button>
-			{/if}
-			{#if isSuperAdmin}
+			{#if isAdmin}
 				<a href="/admin" class="linkbtn hidden sm:inline">admin</a>
 			{/if}
 			<span class="hidden max-w-[14rem] truncate text-xs md:inline" style="color: var(--muted);">{data.user.email}</span>
@@ -1028,306 +925,30 @@
 		</div>
 	</header>
 
+	{#if !canManage}
+		<!-- Signed in, but not a CR yet -->
+		<main class="flex flex-1 items-center justify-center px-4 py-16">
+			<div class="card card-pad animate-in flex max-w-md flex-col gap-3 text-center">
+				<h1 class="title-md">Waiting for access</h1>
+				<p class="hint">Your account isn't a class rep yet. An admin needs to assign you a batch before you can manage a timetable.</p>
+				<p class="hint" style="font-size: 0.75rem;">Signed in as {data.user.email}</p>
+			</div>
+		</main>
+	{:else}
+
 	<!-- Tabs -->
 	<nav class="flex gap-5 overflow-x-auto px-4 md:gap-7 md:px-8" style="border-bottom: 1px solid var(--border);">
-		{#if viewAsStudent || !canManage}
-			<button onclick={() => activeTab = 'preferences'} class="tab {activeTab === 'preferences' ? 'tab-active' : ''}">preferences</button>
-			<button onclick={() => activeTab = 'mytimetable'} class="tab {activeTab === 'mytimetable' ? 'tab-active' : ''}">my timetable</button>
-		{/if}
-		{#if !viewAsStudent && canManage}
-			<button onclick={() => activeTab = 'demand'} class="tab {activeTab === 'demand' ? 'tab-active' : ''}">demand{#if notifications.length > 0}<span class="absolute -right-2.5 top-2.5 h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{/if}</button>
-			<button onclick={() => activeTab = 'timetable'} class="tab {activeTab === 'timetable' ? 'tab-active' : ''}">timetable</button>
-			<button onclick={() => activeTab = 'settings'} class="tab {activeTab === 'settings' ? 'tab-active' : ''}">constraints</button>
-		{/if}
+		<button onclick={() => activeTab = 'courses'} class="tab {activeTab === 'courses' ? 'tab-active' : ''}">courses{#if notifications.length > 0}<span class="absolute -right-2.5 top-2.5 h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{/if}</button>
+		<button onclick={() => activeTab = 'timetable'} class="tab {activeTab === 'timetable' ? 'tab-active' : ''}">timetable</button>
+		<button onclick={() => activeTab = 'settings'} class="tab {activeTab === 'settings' ? 'tab-active' : ''}">constraints</button>
+		<button onclick={() => activeTab = 'browse'} class="tab {activeTab === 'browse' ? 'tab-active' : ''}">browse batch</button>
 	</nav>
 
 	<!-- Content -->
 	<main class="flex-1 px-4 py-8 md:px-8 md:py-12">
 
-		<!-- ==================== STUDENT: PREFERENCES ==================== -->
-		{#if activeTab === 'preferences'}
-			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
-				<div class="flex flex-col gap-1.5">
-					<h1 class="title-xl">Your preferences</h1>
-					<p class="hint">Tell us your batch and the electives you'd like — your class rep uses this to build the timetable.</p>
-				</div>
-
-				<div class="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-x-8 lg:gap-y-6">
-				<div class="flex min-w-0 flex-col gap-5">
-				<!-- Profile strip -->
-				<div class="flex items-center gap-3 rounded-xl border px-3 py-2.5" style="border-color: var(--border); background: var(--surface);">
-					<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.2rem;">{(data.user.name ?? '?').charAt(0).toUpperCase()}</div>
-					<div class="min-w-0 flex-1">
-						<p class="truncate font-semibold" style="color: var(--fg);">{data.user.name}</p>
-						<p class="truncate text-sm" style="color: var(--muted);">{data.user.email}</p>
-					</div>
-					<span class="badge">{data.user.role}</span>
-				</div>
-
-				<!-- Step 1: batch -->
-				<div class="card flex flex-col {editingBatch || !studentBatch ? 'card-pad gap-4' : 'px-5 py-4'}">
-					<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-						<span class="step-num">1</span>
-						<h2 class="title-md">Your batch</h2>
-						{#if !editingBatch && studentBatch}
-							<div class="flex flex-wrap gap-1.5">
-								{#each studentBatch.split(',').map(b => b.trim()).filter(Boolean) as b}
-									<span class="badge" style="color: var(--fg); font-size: 0.7rem;">{b}</span>
-								{/each}
-							</div>
-						{/if}
-						<div class="flex-1"></div>
-						{#if !studentBatch}
-							<span class="badge" style="color: #d8593f; border-color: color-mix(in srgb, #d8593f 45%, var(--border));">required</span>
-						{:else if !editingBatch}
-							<button onclick={() => editingBatch = true} class="linkbtn">edit</button>
-						{/if}
-					</div>
-
-					{#if editingBatch || !studentBatch}
-						<div class="flex flex-col gap-3">
-							<p class="hint">Add every batch code you belong to — e.g. ECE 2nd years have both <span style="color: var(--fg); font-weight: 600;">ELC2X</span> and <span style="color: var(--fg); font-weight: 600;">ELC2YR</span>.</p>
-							{#each batchInputs as input, i}
-								{@const isValid = allBatches().includes(batchInputs[i].trim().toUpperCase())}
-								<div class="relative flex items-center gap-2">
-									<div class="relative flex-1">
-										<input
-											type="text"
-											bind:value={batchInputs[i]}
-											oninput={() => onBatchInput(i)}
-											onfocus={() => onBatchInput(i)}
-											onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
-											placeholder="e.g. ELC21"
-											autocomplete="off"
-											class="input uppercase"
-											style={isValid ? 'border-color: #22c55e; padding-right: 2.2rem;' : ''}
-										/>
-										{#if isValid}
-											<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-										{/if}
-									</div>
-									{#if batchInputs.length > 1}
-										<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
-											class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
-											style="border-color: var(--border); color: var(--muted);"
-											onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
-											onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-										>&times;</button>
-									{/if}
-									{#if batchSuggestions[i]?.length}
-										<div class="card absolute left-0 top-full z-10 mt-1 max-h-44 w-full overflow-y-auto p-1"
-											style="box-shadow: var(--shadow-lg);">
-											{#each batchSuggestions[i] as suggestion}
-												<button
-													onmousedown={() => selectBatchSuggestion(i, suggestion)}
-													ontouchstart={() => selectBatchSuggestion(i, suggestion)}
-													class="block w-full cursor-pointer rounded-md border-none bg-transparent px-3 py-2.5 text-left text-sm uppercase transition-colors duration-100"
-													style="color: var(--muted);"
-													onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
-													onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
-												>{suggestion}</button>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/each}
-							<div class="mt-1 flex items-center gap-3">
-								{#if batchInputs.length < 4}
-									<button onclick={addBatchInput} class="linkbtn">+ add another batch</button>
-								{/if}
-								<div class="flex-1"></div>
-								{#if studentBatch && editingBatch}
-									<button onclick={() => { editingBatch = false; batchInputs = studentBatch.split(',').map(b => b.trim()).filter(Boolean); batchSuggestions = batchInputs.map(() => []); }}
-										class="btn btn-ghost btn-sm">cancel</button>
-								{/if}
-								<button onclick={saveBatch} disabled={batchSubmitting} class="btn btn-primary btn-sm">{batchSubmitting ? 'saving…' : 'save batch'}</button>
-							</div>
-						</div>
-					{/if}
-				</div>
-
-				<!-- helper tip -->
-				<div class="card flex items-start gap-2.5 px-4 py-3.5">
-					<svg width="16" height="16" class="mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
-					<p class="hint" style="font-size: 0.8rem;">You can update these any time until your class rep locks preferences. Rank by genuine interest — it helps your CR resolve clashes.</p>
-				</div>
-				</div>
-				<div class="flex min-w-0 flex-col gap-5">
-				<!-- Step 2: course preferences — gated behind batch -->
-				{#if !studentBatch}
-					<div class="card card-pad flex items-center gap-3" style="border-style: dashed;">
-						<svg width="20" height="20" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-						<p class="hint">Save your batch above to unlock course preferences.</p>
-					</div>
-				{:else}
-					<div class="card card-pad flex flex-col gap-5">
-						<div class="flex items-center gap-3">
-							<span class="step-num">2</span>
-							<div class="min-w-0 flex-1"><h2 class="title-md">Course preferences</h2></div>
-							{#if locked}<span class="badge">🔒 locked</span>{/if}
-						</div>
-
-						{#if loadingCourses}
-							<p class="hint animate-pulse">Loading courses…</p>
-						{:else}
-							<div class="flex flex-col">
-								<label for="pref-minor" class="field-label">Minor <span style="color: var(--muted); font-weight: 400;">· optional</span></label>
-								<select id="pref-minor" bind:value={minor} disabled={locked}
-									class="select disabled:opacity-40">
-									<option value="">— none —</option>
-									{#each minorPrograms as p}<option value={p}>{p}</option>{/each}
-								</select>
-							</div>
-
-							<label class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors {locked ? 'opacity-40' : ''}" style="border-color: {minorOnly ? 'var(--accent)' : 'var(--border)'}; background: {minorOnly ? 'var(--tint)' : 'transparent'};">
-								<input type="checkbox" checked={minorOnly} disabled={locked} style="accent-color: var(--accent); width: 1.05rem; height: 1.05rem;"
-									onchange={(e) => { minorOnly = e.currentTarget.checked; if (minorOnly) { uwePref1 = ''; uwePref2 = ''; uwePref3 = ''; } }} />
-								<span class="text-sm" style="color: var(--fg);">Minor only — I don't want a UWE elective</span>
-							</label>
-
-							{#if !minorOnly}
-								<div class="flex flex-col gap-3">
-									<div class="flex items-baseline justify-between gap-3">
-										<span class="field-label" style="margin: 0;">Rank your electives</span>
-										<span class="eyebrow" style="font-size: 0.58rem;">1 = most wanted</span>
-									</div>
-									{#each [{ v: uwePref1, s: (x: string) => uwePref1 = x }, { v: uwePref2, s: (x: string) => uwePref2 = x }, { v: uwePref3, s: (x: string) => uwePref3 = x }] as pref, i}
-										<div class="flex items-center gap-3">
-											<span class="rank-num">{i + 1}</span>
-											<select aria-label="Elective choice {i + 1}" value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
-												class="select flex-1 disabled:opacity-40">
-												<option value="">{i === 0 ? '— first choice —' : i === 1 ? '— second choice —' : '— third choice —'}</option>
-												{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
-											</select>
-										</div>
-									{/each}
-								</div>
-							{/if}
-
-							{#if prefError}<p class="flex items-center gap-2 text-sm" style="color: #d8593f;"><span>⚠</span>{prefError}</p>{/if}
-							{#if prefSuccess}<p class="flex items-center gap-2 text-sm" style="color: #3fa463;"><span>✓</span>{prefSuccess}</p>{/if}
-
-							{#if !locked}
-								<button onclick={submitPreferences} disabled={submitting} class="btn btn-primary btn-block" style="padding-top: 0.85rem; padding-bottom: 0.85rem;">{submitting ? 'saving…' : data.preference ? 'update preferences' : 'submit preferences'}</button>
-							{:else}
-								<p class="hint">Editing is locked by your class rep.</p>
-							{/if}
-						{/if}
-					</div>
-				{/if}
-				</div>
-				</div>
-			</div>
-
-		<!-- ==================== STUDENT: MY TIMETABLE ==================== -->
-		{:else if activeTab === 'mytimetable'}
-			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
-				<div class="flex flex-col gap-1">
-					<h1 class="title-xl">My timetable</h1>
-					<p class="hint">{selectedBatches.length ? 'Your weekly schedule across the batches below.' : 'Enter your batch code(s) and load to see your weekly schedule.'}</p>
-				</div>
-
-				<!-- Batch selector -->
-				<div class="card flex flex-col gap-2.5 p-4 max-w-md">
-					<span class="eyebrow">Batches</span>
-					<div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));">
-						{#each batchInputs as input, i}
-							<div class="relative flex items-center gap-2">
-								<input
-									type="text"
-									bind:value={batchInputs[i]}
-									oninput={() => onBatchInput(i)}
-									onfocus={() => onBatchInput(i)}
-									onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
-									placeholder="e.g. CSE2X"
-									autocomplete="off"
-									class="input uppercase"
-								/>
-								{#if batchInputs.length > 1}
-									<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
-										class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
-										style="border-color: var(--border); color: var(--muted);"
-										onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
-										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-									>&times;</button>
-								{/if}
-								<!-- Suggestions dropdown -->
-								{#if batchSuggestions[i]?.length}
-									<div class="card absolute left-0 top-full z-10 mt-1 max-h-44 w-full overflow-y-auto p-1" style="box-shadow: var(--shadow-lg);">
-										{#each batchSuggestions[i] as suggestion}
-											<button
-												onmousedown={() => selectBatchSuggestion(i, suggestion)}
-												ontouchstart={() => selectBatchSuggestion(i, suggestion)}
-												class="block w-full cursor-pointer rounded-md border-none bg-transparent px-3 py-2.5 text-left text-sm uppercase transition-colors duration-100"
-												style="color: var(--muted);"
-												onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
-												onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
-											>{suggestion}</button>
-										{/each}
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
-
-					<div class="flex items-center gap-3">
-						{#if batchInputs.length < 4}
-							<button onclick={addBatchInput} class="linkbtn">+ add batch</button>
-						{/if}
-						<div class="flex-1"></div>
-						<button onclick={loadBatches} class="btn btn-primary btn-sm">load timetable</button>
-					</div>
-				</div>
-
-				<!-- Timetable grid -->
-				{#if selectedBatches.length && studentBlocks().length}
-					<div class="nood-mono overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
-						<div class="min-w-[600px]">
-							<div class="grid" style="grid-template-columns: 50px repeat({DAYS.length}, 1fr); border: 1px solid var(--border);">
-								<div style="border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);"></div>
-								{#each DAYS as day}
-									<div class="px-1 py-2 text-center text-[8px] uppercase tracking-[0.08em]"
-										style="border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); color: var(--muted);">
-										<span class="hidden md:inline">{day}</span><span class="md:hidden">{day.slice(0, 3)}</span>
-									</div>
-								{/each}
-								{#each sTimeLabels as { mins, label }, i}
-									{#if i < sTimeLabels.length - 1}
-										<div class="relative px-0.5 text-right" style="height: 56px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-											<span class="text-[9px]" style="color: var(--muted);">{label}</span>
-										</div>
-										{#each DAYS as day}
-											{@const hStart = mins}
-											{@const hEnd = mins + 60}
-											<div class="relative" style="height: 56px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-												{#each studentBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
-													{@const top = ((block.startMin - hStart) / 60) * 100}
-													{@const h = ((block.endMin - block.startMin) / 60) * 56}
-													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
-														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--block); border: 1px solid var(--border);">
-														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
-														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
-														{#if h > 32}
-															<div class="text-[8px] truncate" style="color: var(--muted);">{block.course.room} • {block.course.faculty}</div>
-														{/if}
-													</div>
-												{/each}
-											</div>
-										{/each}
-									{/if}
-								{/each}
-							</div>
-						</div>
-					</div>
-				{:else if selectedBatches.length}
-					<div class="card card-pad text-center">
-						<p class="hint">No courses found for these batches — double-check the codes above.</p>
-					</div>
-				{/if}
-			</div>
-
-		<!-- ==================== CR: DEMAND ==================== -->
-		{:else if activeTab === 'demand'}
+		<!-- ==================== CR: COURSES ==================== -->
+		{#if activeTab === 'courses'}
 			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
 				{#if notifications.length > 0}
 					<div class="flex flex-col gap-2">
@@ -1342,76 +963,86 @@
 						{/each}
 					</div>
 				{/if}
-				<div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-					<div class="flex flex-col gap-1">
-						<h1 class="title-xl">Elective demand</h1>
-						<p class="hint">Electives students want, and whether each clashes with your batch timetable. <span style="color: var(--fg); font-weight: 600;">{totalStudents}</span> submitted.</p>
-					</div>
-					<button onclick={toggleLockAll} disabled={lockSubmitting} class="btn btn-sm {locked ? 'btn-danger' : 'btn-ghost'}">
-						{#if locked}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
-						{:else}
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-						{/if}
-						{lockSubmitting ? (locked ? 'unlocking…' : 'locking…') : (locked ? 'unlock editing' : 'lock preferences')}
-					</button>
+
+				<div class="flex flex-col gap-1">
+					<h1 class="title-xl">Courses you're tracking</h1>
+					<p class="hint">Search the timetable and add any course you care about. Added courses overlay onto your weekly grid and show whether they clash with your batch.</p>
 				</div>
 
-				{#if loadingCR}
-					<p class="text-xs animate-pulse" style="color: var(--muted);">loading...</p>
-				{:else}
-					<!-- Filter chips — horizontally scrollable so 20+ depts stay tidy -->
-					{#if demandDepts.length > 1}
-						<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
-							<button onclick={() => deptFilter = ''}
-								class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-								style="border-color: {!deptFilter ? 'var(--muted)' : 'var(--border)'}; color: {!deptFilter ? 'var(--fg)' : 'var(--muted)'}; background: transparent;"
-							>all</button>
-							{#each demandDepts as dept}
-								<button onclick={() => deptFilter = deptFilter === dept ? '' : dept}
-									class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-									style="border-color: {deptFilter === dept ? 'var(--accent)' : 'var(--border)'}; color: {deptFilter === dept ? 'var(--accent)' : 'var(--muted)'}; background: {deptFilter === dept ? 'var(--tint)' : 'transparent'};"
-								>{dept}</button>
-							{/each}
-						</div>
+				<!-- Search + add -->
+				<div class="card card-pad flex flex-col gap-3">
+					<label for="course-search" class="field-label">Add a course <span style="color: var(--muted); font-weight: 400;">— search by code or name</span></label>
+					<input id="course-search" bind:value={search} placeholder="e.g. ECE204 or Signals" autocomplete="off" class="input" />
+					{#if loadingCourses}
+						<p class="hint animate-pulse">Loading courses…</p>
+					{:else if search.trim().length >= 2}
+						{#if searchResults().length}
+							<div class="flex flex-col" style="max-height: 20rem; overflow-y: auto;">
+								{#each searchResults() as r}
+									{@const level = getTrafficLight(r.code)}
+									<div class="flex items-center gap-3 px-1 py-2" style="border-bottom: 1px solid var(--border);">
+										<span class="inline-block h-2 w-2 shrink-0 rounded-full" style="background: {tColors[level]};"></span>
+										<div class="min-w-0 flex-1">
+											<div class="truncate text-sm font-medium" style="color: var(--fg);">{r.code}</div>
+											<div class="truncate text-xs" style="color: var(--muted);">{r.name}</div>
+										</div>
+										{#if r.watched}
+											<span class="badge shrink-0">added</span>
+										{:else}
+											<button onclick={() => addCourse(r.code, r.name)} disabled={addingCode === r.code} class="btn btn-primary btn-sm shrink-0">
+												{addingCode === r.code ? 'adding…' : '+ add'}
+											</button>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="hint">No course matches “{search.trim()}”.</p>
+						{/if}
+					{:else}
+						<p class="hint">Type at least 2 characters to search.</p>
 					{/if}
+				</div>
 
+				<!-- Watch list -->
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<h2 class="title-md">Your list ({myCourses.length})</h2>
+					<div class="flex gap-1.5">
+						{#each [['course', 'by course'], ['conflict', 'least conflict']] as [mode, label]}
+							<button onclick={() => listSort = mode as 'course' | 'conflict'}
+								class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+								style="border-color: {listSort === mode ? 'var(--accent)' : 'var(--border)'}; color: {listSort === mode ? 'var(--accent)' : 'var(--muted)'}; background: {listSort === mode ? 'var(--tint)' : 'transparent'};"
+							>{label}</button>
+						{/each}
+					</div>
+				</div>
+
+				{#if !myCourses.length}
+					<div class="card card-pad text-center" style="border-style: dashed;">
+						<p class="hint">Nothing tracked yet — search above and add your first course.</p>
+					</div>
+				{:else}
 					<div class="card nood-mono overflow-x-auto">
 						<table class="w-full min-w-[540px] text-left text-sm" style="border-collapse: collapse;">
 							<thead>
 								<tr style="border-bottom: 1px solid var(--border);">
 									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">course</th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">p1/p2/p3</th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
-										style="color: {demandSort === 'score' ? 'var(--accent)' : 'var(--muted)'};"
-										onclick={() => { if (demandSort === 'score') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'score'; demandSortDir = 'desc'; } }}
-									>score <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'score' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
-										style="color: {demandSort === 'total' ? 'var(--accent)' : 'var(--muted)'};"
-										onclick={() => { if (demandSort === 'total') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'total'; demandSortDir = 'desc'; } }}
-									>interested <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'total' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
-									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
-										style="color: {demandSort === 'conflict' ? 'var(--accent)' : 'var(--muted)'};"
-										onclick={() => { if (demandSort === 'conflict') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'conflict'; demandSortDir = 'asc'; } }}
-									>conflicts <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'conflict' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">conflicts</th>
 									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">status</th>
+									<th class="px-4 py-3"><span class="sr-only">actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each filteredDemand() as item}
+								{#each sortedMyCourses() as item}
 									{@const level = getTrafficLight(item.courseCode)}
 									{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
 									{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
-									{@const conf = demandConflicts().get(item.courseCode)}
-									{@const match = courses.find((c) => c.courseCode.startsWith(item.courseCode))}
+									{@const conf = courseConflicts().get(item.courseCode)}
 									<tr style="border-bottom: 1px solid var(--border);">
 										<td class="px-3 py-2.5">
 											<span class="font-medium" style="color: var(--fg);">{item.courseCode}</span>
-											{#if match}<span class="ml-2 hidden text-[9px] md:inline" style="color: var(--muted);">{match.courseName}</span>{/if}
+											{#if item.courseName}<span class="ml-2 hidden text-[9px] md:inline" style="color: var(--muted);">{item.courseName}</span>{/if}
 										</td>
-										<td class="px-3 py-2.5" style="color: var(--muted);">{item.p1}/{item.p2}/{item.p3}</td>
-										<td class="px-3 py-2.5 font-medium" style="color: var(--fg);">{item.priorityScore}</td>
-										<td class="px-3 py-2.5" style="color: var(--muted);">{item.total}</td>
 										<td class="px-3 py-2.5 whitespace-nowrap">
 											{#if conf && conf.score > 0}
 												{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}
@@ -1429,12 +1060,19 @@
 												{/if}
 											</div>
 										</td>
+										<td class="px-3 py-2.5 text-right">
+											<button onclick={() => removeCourse(item.courseCode)}
+												class="cursor-pointer border-none bg-transparent text-xs transition-colors"
+												style="color: var(--muted);"
+												onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; }}
+												onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+											>remove</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
 						</table>
 					</div>
-					{#if !filteredDemand().length}<p class="text-center text-xs py-8" style="color: var(--muted);">{demand.length ? 'no courses match this filter' : 'no submissions yet'}</p>{/if}
 
 					<!-- Legend -->
 					<div class="flex flex-wrap gap-4 pt-3" style="border-top: 1px solid var(--border);">
@@ -1448,23 +1086,6 @@
 							<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
 							<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">cr moved this slot</span>
 						</div>
-					</div>
-
-					<!-- Minor demand -->
-					<div class="flex flex-col gap-3 pt-4" style="border-top: 1px solid var(--border);">
-						<h2 class="title-md">minor demand</h2>
-						{#if minorDemand.length}
-							<div class="flex flex-col">
-								{#each minorDemand as item}
-									<div class="flex items-center justify-between gap-3 px-3 py-2.5" style="border-bottom: 1px solid var(--border);">
-										<span class="min-w-0 truncate text-xs" style="color: var(--fg);">{item.minor}</span>
-										<span class="shrink-0 text-xs font-medium" style="color: var(--fg);">{item.count} <span class="text-[9px] font-normal uppercase tracking-[0.08em]" style="color: var(--muted);">{item.count === 1 ? 'student' : 'students'}</span></span>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="text-xs" style="color: var(--muted);">no minor selections yet</p>
-						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1673,87 +1294,42 @@
 					</div>
 				{/if}
 
-				<!-- UWE overlay controls -->
-				{#if demand.length > 0}
+				<!-- Tracked-course overlay controls -->
+				{#if myCourses.length > 0}
 					<div class="flex flex-col gap-4 pt-3" style="border-top: 1px solid var(--border);">
-						<!-- Top 3 UWEs (auto-shown) -->
 						<div class="flex flex-col gap-2">
 							<div class="flex flex-wrap items-center justify-between gap-2">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">top 3 uwes (shown on timetable)</span>
+								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">your courses — click to overlay</span>
 								<div class="flex gap-1.5">
-									{#each [['demand', 'by demand'], ['conflict', 'least conflict']] as [mode, label]}
-										<button onclick={() => setTopUweMode(mode as 'demand' | 'conflict')}
+									{#each [['course', 'by course'], ['conflict', 'least conflict']] as [mode, label]}
+										<button onclick={() => listSort = mode as 'course' | 'conflict'}
 											class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-											style="border-color: {topUweMode === mode ? 'var(--accent)' : 'var(--border)'}; color: {topUweMode === mode ? 'var(--accent)' : 'var(--muted)'}; background: {topUweMode === mode ? 'var(--tint)' : 'transparent'};"
+											style="border-color: {listSort === mode ? 'var(--accent)' : 'var(--border)'}; color: {listSort === mode ? 'var(--accent)' : 'var(--muted)'}; background: {listSort === mode ? 'var(--tint)' : 'transparent'};"
 										>{label}</button>
 									{/each}
 								</div>
 							</div>
-							<div class="grid grid-cols-1 gap-1.5 md:grid-cols-3">
-								{#each rankedDemand().slice(0, 3) as item, rank}
+							<div class="flex flex-wrap gap-1.5">
+								{#each sortedMyCourses() as item}
 									{@const level = getTrafficLight(item.courseCode)}
-									{@const match = courses.find((c) => c.courseCode.startsWith(item.courseCode))}
-									{@const conf = demandConflicts().get(item.courseCode)}
+									{@const active = enabledCourses.has(item.courseCode)}
+									{@const conf = courseConflicts().get(item.courseCode)}
 									<button
-										onclick={() => toggleUWE(item.courseCode)}
-										class="flex cursor-pointer items-center gap-2 border px-2.5 py-2 text-left transition-colors duration-150"
-										style="border-color: {enabledUWEs.has(item.courseCode) ? (tColors[level] + '66') : 'var(--border)'}; background: {enabledUWEs.has(item.courseCode) ? 'var(--tint)' : 'transparent'}; border-left: 3px solid {tColors[level]};"
+										onclick={() => toggleCourseOverlay(item.courseCode)}
+										class="cursor-pointer border px-2 py-1 text-[10px] tracking-wide transition-all duration-150"
+										style="border-color: {active ? (tColors[level] + '88') : 'var(--border)'}; color: {active ? 'var(--fg)' : 'var(--muted)'}; background: {active ? 'var(--tint)' : 'transparent'};"
 									>
-										<div class="min-w-0 flex-1">
-											<div class="flex items-center gap-1.5">
-												<span class="text-[10px] font-medium" style="color: var(--fg);">{item.courseCode}</span>
-												{#if topUweMode === 'demand'}
-													<span class="text-[8px]" style="color: var(--muted);">P{rank + 1}</span>
-												{:else if conf && conf.score > 0}
-													<span class="text-[8px]">
-														{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);">·</span>{/if}{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
-													</span>
-												{:else}
-													<span class="text-[8px]" style="color: {tColors.green};">clear</span>
-												{/if}
-											</div>
-											{#if match}<div class="text-[8px] truncate" style="color: var(--muted);">{match.courseName}</div>{/if}
-										</div>
-										<div class="flex flex-col items-end flex-shrink-0">
-											<span class="text-[9px] font-medium" style="color: var(--fg);">{item.priorityScore}</span>
-											<span class="text-[7px]" style="color: var(--muted);">{item.p1}/{item.p2}/{item.p3}</span>
-										</div>
+										<span class="inline-block h-1 w-1 rounded-full mr-1" style="background: {tColors[level]};"></span>
+										{item.courseCode}
+										{#if conf && conf.score > 0}
+											<span class="text-[7px] ml-0.5">
+												{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);">·</span>{/if}{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
+											</span>
+										{/if}
 									</button>
 								{/each}
 							</div>
 						</div>
-
-						<!-- Rest of UWEs as toggles -->
-						{#if restDemandedUWEs().length > 0}
-							<div class="flex flex-col gap-2">
-								<div class="flex flex-wrap items-center justify-between gap-2">
-									<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">other demanded uwes — click to overlay</span>
-									<div class="flex gap-1.5">
-										{#each [['course', 'by course'], ['demand', 'by demand'], ['conflict', 'least conflict']] as [mode, label]}
-											<button onclick={() => restUweSort = mode as 'course' | 'demand' | 'conflict'}
-												class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-												style="border-color: {restUweSort === mode ? 'var(--accent)' : 'var(--border)'}; color: {restUweSort === mode ? 'var(--accent)' : 'var(--muted)'}; background: {restUweSort === mode ? 'var(--tint)' : 'transparent'};"
-											>{label}</button>
-										{/each}
-									</div>
-								</div>
-								<div class="flex flex-wrap gap-1.5">
-									{#each restDemandedUWEs() as item}
-										{@const level = getTrafficLight(item.courseCode)}
-										{@const active = enabledUWEs.has(item.courseCode)}
-										<button
-											onclick={() => toggleUWE(item.courseCode)}
-											class="cursor-pointer border px-2 py-1 text-[10px] tracking-wide transition-all duration-150"
-											style="border-color: {active ? (tColors[level] + '88') : 'var(--border)'}; color: {active ? 'var(--fg)' : 'var(--muted)'}; background: {active ? 'var(--tint)' : 'transparent'};"
-										>
-											<span class="inline-block h-1 w-1 rounded-full mr-1" style="background: {tColors[level]};"></span>
-											{item.courseCode}
-											<span class="text-[7px] ml-0.5" style="color: var(--muted);">{item.priorityScore}</span>
-										</button>
-									{/each}
-								</div>
-							</div>
-						{/if}
 
 						<!-- Legend -->
 						<div class="flex flex-wrap gap-4">
@@ -1837,6 +1413,9 @@
 				<!-- List -->
 				<div class="card card-pad flex flex-col gap-3">
 					<span class="eyebrow">Active ({constraints.length})</span>
+					{#if loadingCR}
+						<p class="hint animate-pulse">Loading…</p>
+					{/if}
 					{#each constraints as c}
 						<div class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5" style="border-color: var(--border);">
 							<div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -1856,8 +1435,116 @@
 				</div>
 				</div>
 			</div>
+
+		<!-- ==================== CR: BROWSE ANY BATCH ==================== -->
+		{:else if activeTab === 'browse'}
+			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
+				<div class="flex flex-col gap-1">
+					<h1 class="title-xl">Browse a batch</h1>
+					<p class="hint">{selectedBatches.length ? 'Weekly schedule across the batches below (read-only).' : 'Enter batch code(s) and load to see their weekly schedule.'}</p>
+				</div>
+
+				<!-- Batch selector -->
+				<div class="card flex flex-col gap-2.5 p-4 max-w-md">
+					<span class="eyebrow">Batches</span>
+					<div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));">
+						{#each batchInputs as input, i}
+							<div class="relative flex items-center gap-2">
+								<input
+									type="text"
+									bind:value={batchInputs[i]}
+									oninput={() => onBatchInput(i)}
+									onfocus={() => onBatchInput(i)}
+									onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
+									placeholder="e.g. CSE2X"
+									autocomplete="off"
+									class="input uppercase"
+								/>
+								{#if batchInputs.length > 1}
+									<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
+										class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
+										style="border-color: var(--border); color: var(--muted);"
+										onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
+										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+									>&times;</button>
+								{/if}
+								<!-- Suggestions dropdown -->
+								{#if batchSuggestions[i]?.length}
+									<div class="card absolute left-0 top-full z-10 mt-1 max-h-44 w-full overflow-y-auto p-1" style="box-shadow: var(--shadow-lg);">
+										{#each batchSuggestions[i] as suggestion}
+											<button
+												onmousedown={() => selectBatchSuggestion(i, suggestion)}
+												ontouchstart={() => selectBatchSuggestion(i, suggestion)}
+												class="block w-full cursor-pointer rounded-md border-none bg-transparent px-3 py-2.5 text-left text-sm uppercase transition-colors duration-100"
+												style="color: var(--muted);"
+												onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
+												onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
+											>{suggestion}</button>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+
+					<div class="flex items-center gap-3">
+						{#if batchInputs.length < 4}
+							<button onclick={addBatchInput} class="linkbtn">+ add batch</button>
+						{/if}
+						<div class="flex-1"></div>
+						<button onclick={loadBatches} class="btn btn-primary btn-sm">load timetable</button>
+					</div>
+				</div>
+
+				<!-- Timetable grid -->
+				{#if selectedBatches.length && browseBlocks().length}
+					<div class="nood-mono overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+						<div class="min-w-[600px]">
+							<div class="grid" style="grid-template-columns: 50px repeat({DAYS.length}, 1fr); border: 1px solid var(--border);">
+								<div style="border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);"></div>
+								{#each DAYS as day}
+									<div class="px-1 py-2 text-center text-[8px] uppercase tracking-[0.08em]"
+										style="border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); color: var(--muted);">
+										<span class="hidden md:inline">{day}</span><span class="md:hidden">{day.slice(0, 3)}</span>
+									</div>
+								{/each}
+								{#each sTimeLabels as { mins, label }, i}
+									{#if i < sTimeLabels.length - 1}
+										<div class="relative px-0.5 text-right" style="height: 56px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+											<span class="text-[9px]" style="color: var(--muted);">{label}</span>
+										</div>
+										{#each DAYS as day}
+											{@const hStart = mins}
+											{@const hEnd = mins + 60}
+											<div class="relative" style="height: 56px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+												{#each browseBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
+													{@const top = ((block.startMin - hStart) / 60) * 100}
+													{@const h = ((block.endMin - block.startMin) / 60) * 56}
+													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
+														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--block); border: 1px solid var(--border);">
+														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
+														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+														{#if h > 32}
+															<div class="text-[8px] truncate" style="color: var(--muted);">{block.course.room} • {block.course.faculty}</div>
+														{/if}
+													</div>
+												{/each}
+											</div>
+										{/each}
+									{/if}
+								{/each}
+							</div>
+						</div>
+					</div>
+				{:else if selectedBatches.length}
+					<div class="card card-pad text-center">
+						<p class="hint">No courses found for these batches — double-check the codes above.</p>
+					</div>
+				{/if}
+			</div>
 		{/if}
 	</main>
+	{/if}
 
 	<!-- Toast -->
 	{#if toast}
@@ -1867,16 +1554,16 @@
 		</div>
 	{/if}
 
-	<!-- UWE conflict warning modal -->
+	<!-- Tracked-course warning modal -->
 	{#if moveWarnModal}
 		<div class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);" onclick={cancelDrop}>
 			<div class="card animate-in flex w-full max-w-sm flex-col gap-5 p-6" style="box-shadow: var(--shadow-lg);" onclick={(e) => e.stopPropagation()}>
 				<div class="flex flex-col gap-2">
 					<span class="eyebrow" style="color: var(--accent);">heads up</span>
 					<p class="text-base leading-relaxed" style="color: var(--fg);">
-						<span class="font-semibold">{moveWarnModal.count} {moveWarnModal.count === 1 ? 'student has' : 'students have'}</span> listed
-						<span class="font-semibold">{moveWarnModal.courseCode}</span> as a UWE preference.
-						Shifting this class may create conflicts for them.
+						<span class="font-semibold">{moveWarnModal.count} other {moveWarnModal.count === 1 ? 'CR is' : 'CRs are'}</span> tracking
+						<span class="font-semibold">{moveWarnModal.courseCode}</span>.
+						Shifting this class may create conflicts for their batches.
 					</p>
 					<p class="hint">Do you still want to proceed with the move?</p>
 				</div>
