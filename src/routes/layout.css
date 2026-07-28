@@ -194,17 +194,17 @@ body {
 
 .card {
 	background-color: var(--surface);
-	background-image: repeating-linear-gradient(
-		to bottom,
-		transparent 0 27px,
-		var(--rule) 27px 28px
-	);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
 	box-shadow: var(--shadow);
 }
 .card-pad {
 	padding: 1.4rem;
+	background-image: repeating-linear-gradient(
+		to bottom,
+		transparent 0 27px,
+		var(--rule) 27px 28px
+	);
 }
 @media (min-width: 768px) {
 	.card-pad {
