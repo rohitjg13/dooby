@@ -34,12 +34,12 @@
 		</div>
 
 		{#if form?.error}
-			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, #d8593f 45%, var(--border)); color: #d8593f;">
+			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger);">
 				<span>⚠</span>{form.error}
 			</div>
 		{/if}
 		{#if form?.success}
-			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, #3fa463 45%, var(--border)); color: #3fa463;">
+			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--ok);">
 				<span>✓</span>
 				{#if form.action === 'assignCr'}
 					{form.name} is now CR of {form.batch}
@@ -141,7 +141,7 @@
 													type="submit"
 													class="cursor-pointer border-none bg-transparent text-base leading-none transition-colors duration-200"
 													style="color: var(--muted);"
-													onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = '#d8593f'; }}
+													onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--danger)'; }}
 													onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; }}
 													aria-label="remove {b.name}"
 												>×</button>

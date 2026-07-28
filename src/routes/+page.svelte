@@ -1109,7 +1109,7 @@
 											<button onclick={() => removeCourse(item.courseCode)}
 												class="cursor-pointer border-none bg-transparent text-xs transition-colors"
 												style="color: var(--muted);"
-												onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; }}
+												onmouseenter={(e) => { e.currentTarget.style.color = 'var(--danger)'; }}
 												onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
 											>remove</button>
 										</td>
@@ -1502,7 +1502,7 @@
 							<button onclick={() => removeConstraint(c.id)}
 								class="shrink-0 cursor-pointer border-none bg-transparent text-xs font-medium transition-colors"
 								style="color: var(--muted);"
-								onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; }}
+								onmouseenter={(e) => { e.currentTarget.style.color = 'var(--danger)'; }}
 								onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
 							>remove</button>
 						</div>
@@ -1541,7 +1541,7 @@
 									<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
 										class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
 										style="border-color: var(--border); color: var(--muted);"
-										onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
+										onmouseenter={(e) => { e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.borderColor = 'var(--danger)'; }}
 										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
 									>&times;</button>
 								{/if}
