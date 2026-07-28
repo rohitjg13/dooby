@@ -152,7 +152,7 @@ export const actions: Actions = {
 
 		const remaining = await db.select().from(crAssignment).where(eq(crAssignment.userId, userId)).limit(1);
 		if (remaining.length === 0) {
-			await db.update(user).set({ role: 'student' }).where(eq(user.id, userId));
+			await db.update(user).set({ role: 'pending' }).where(eq(user.id, userId));
 		}
 
 		return { success: true, action: 'removeCr' };

@@ -17,8 +17,8 @@
 <div class="flex min-h-dvh flex-col" style="background: var(--bg);">
 	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
 		<a href="/" class="flex items-center gap-2.5 no-underline">
-			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">n</span>
-			<span class="title-md" style="font-size: 1.35rem;">noodle</span>
+			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">d</span>
+			<span class="title-md" style="font-size: 1.35rem;">dooby</span>
 			<span class="badge ml-1">admin</span>
 		</a>
 		<div class="flex items-center gap-3">
@@ -30,7 +30,7 @@
 	<main class="animate-in mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-8 md:px-8 md:py-12">
 		<div class="flex flex-col gap-1">
 			<h1 class="title-xl">Class representatives</h1>
-			<p class="hint">Assign students as class reps for one or more batches. CRs can manage demand, constraints, and the timetable for their batches.</p>
+			<p class="hint">Assign accounts as class reps for one or more batches. CRs can track courses, set professor constraints, and rearrange the timetable for their batches.</p>
 		</div>
 
 		{#if form?.error}
@@ -76,7 +76,7 @@
 								name="email"
 								type="email"
 								required
-								placeholder="student@example.com"
+								placeholder="rep@example.com"
 								class="input"
 							/>
 						</div>
@@ -113,7 +113,7 @@
 						</button>
 					</form>
 				{:else}
-					<p class="hint">Click <span style="color: var(--fg); font-weight: 600;">+ assign CR</span> to give a student class-rep access for their batches.</p>
+					<p class="hint">Click <span style="color: var(--fg); font-weight: 600;">+ assign CR</span> to give an account class-rep access for their batches. They must have signed in at least once.</p>
 				{/if}
 			</section>
 

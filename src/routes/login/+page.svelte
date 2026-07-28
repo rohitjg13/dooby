@@ -24,13 +24,13 @@
 	</div>
 
 	<main class="animate-in relative z-10 flex w-full max-w-sm flex-col items-center text-center">
-		<span class="eyebrow mb-6">Course &amp; timetable planner</span>
+		<span class="eyebrow mb-6">Class rep timetable planner</span>
 
-		<h1 class="title-xl" style="font-size: clamp(3rem, 12vw, 4rem);">noodle</h1>
+		<h1 class="title-xl" style="font-size: clamp(3rem, 12vw, 4rem);">dooby</h1>
 
 		<p class="hint mt-4 max-w-xs" style="font-size: 0.9rem;">
-			Pick your electives, spot clashes before they happen, and let your class rep
-			arrange the weekly timetable — all in one place.
+			Track the courses your batch cares about, spot clashes before they happen,
+			and rearrange the weekly timetable together with the other reps.
 		</p>
 
 		<div class="my-9 h-px w-12" style="background: var(--border);"></div>
@@ -50,7 +50,7 @@
 		</button>
 
 		<p class="eyebrow mt-6" style="font-size: 0.6rem; letter-spacing: 0.14em;">
-			Sign in with your college account
+			Class reps and admins only
 		</p>
 	</main>
 

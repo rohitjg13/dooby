@@ -1,39 +1,66 @@
-# noodle
+# dooby
 
-A timetable and course preference management system for colleges. Students pick their electives, class reps manage the schedule, and everyone sees conflicts in real time.
+A stripped-down timetable planner for class representatives. No student accounts, no
+preference collection — CRs pick the courses they care about themselves and rearrange the
+weekly schedule around them.
+
+It's a subsidised fork of noodle: same timetable engine, half the moving parts.
 
 ---
 
 ## What it does
 
-Colleges typically have a core timetable plus elective/UWE slots that students need to choose from. Noodle handles the full flow:
+**Class Representatives** get:
 
-**Students** pick a minor program and rank their preferred UWE (elective) courses. The system shows them a personal timetable and flags conflicts between their selections and core courses in real time (green/yellow/red).
+- **Courses** — search the master timetable by course code or name and add any course to a
+  personal watch list. Each tracked course shows how badly it clashes with their own batch's
+  schedule (red = lecture conflict, yellow = tutorial overlap).
+- **Timetable** — a drag-and-drop weekly grid of their batch's classes, with tracked courses
+  overlaid on top. Moves are saved server-side, shared live between CRs (5s polling), and
+  undoable (last 3). "Show original" ghosts the pre-move positions.
+- **Constraints** — mark a professor unavailable on a day or time range; the grid refuses
+  drops into blocked slots.
+- **Browse batch** — read-only view of any batch's weekly schedule.
+- **Notifications** — when another CR moves a class that's in your batch or on your watch
+  list, you get told.
 
-**Class Representatives (CRs)** get a demand view showing how many students want each UWE, a visual timetable editor to drag and reschedule courses so they suggest minor changes to the profs, and a notification system that alerts them when another CR makes a change that affects their batch.
+**Admins** do everything a CR does, plus assign CR access at `/admin`.
 
-**Super Admins** manage which users are CRs for which batches, upload the master timetable as an XLSX file, and view demand across all students.
+Anyone else who signs in lands on a "waiting for access" screen until an admin assigns them
+a batch.
+
+---
+
+## Differences from noodle
+
+| noodle | dooby |
+|---|---|
+| student / cr / super_admin | pending / cr / admin |
+| students submit minor + 3 ranked UWE preferences | no students at all |
+| CR sees aggregated student demand | CR adds the courses they want to track, manually |
+| demand ranking drives the timetable overlay | the CR's own list drives the overlay |
+| "N students ranked this" move warning | "N other CRs are tracking this" move warning |
+| lock/unlock student preferences | — |
+
+Everything else — the timetable grid, conflict maths, overrides, constraints, live sync,
+notifications — is carried over unchanged.
 
 ---
 
 ## Tech stack
 
-- **SvelteKit** — full-stack framework (frontend + API routes)
-- **Svelte 5** with runes mode
-- **Tailwind CSS v4**
-- **PostgreSQL** via **Drizzle ORM** (self-hosted)
-- **Better Auth** — authentication with Google OAuth
-- **TypeScript** throughout
+- **SvelteKit** (Svelte 5, runes) + **Tailwind CSS v4**
+- **PostgreSQL** via **Drizzle ORM**
+- **Better Auth** with Google OAuth
+- **TypeScript**
 
 ---
 
 ## Setup
 
-### 1. Clone and install
+### 1. Install
 
 ```bash
-git clone <repo-url>
-cd noodle
 npm install
 ```
 
@@ -49,6 +76,8 @@ GOOGLE_CLIENT_ID=""
 GOOGLE_CLIENT_SECRET=""
 ```
 
+Use a **separate database from noodle** — the schemas differ.
+
 ### 3. Push the database schema
 
 ```bash
@@ -57,9 +86,20 @@ npm run db:push
 
 ### 4. Add the timetable
 
-Drop your timetable XLSX file into `src/lib/data/`. The admin page will sync batches from it automatically on load.
+Drop your timetable XLSX file into `src/lib/data/`. Batches are synced from it automatically
+whenever the admin page loads.
 
-### 5. Run
+### 5. Make yourself an admin
+
+New accounts are created with role `pending`. After signing in once, promote yourself:
+
+```sql
+UPDATE "user" SET role = 'admin' WHERE email = 'you@example.com';
+```
+
+Then assign CRs from `/admin` — assigning a batch sets that account's role to `cr`.
+
+### 6. Run
 
 ```bash
 npm run dev
@@ -82,8 +122,6 @@ npm run dev
 
 | Role | Access |
 |---|---|
-| `student` | View timetable, submit and lock preferences |
-| `cr` | Everything above + manage schedule for assigned batches |
-| `super_admin` | Everything + manage CR assignments, view all demand |
-
-User roles are set directly in the `user` table.
+| `pending` | Signed in, waiting for an admin to assign a batch |
+| `cr` | Track courses, edit the timetable, set constraints for assigned batches |
+| `admin` | Everything above + assign/remove CRs |

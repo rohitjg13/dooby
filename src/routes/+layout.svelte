@@ -4,7 +4,7 @@
 </script>
 
 <svelte:head>
-	<title>noodle</title>
+	<title>dooby</title>
 </svelte:head>
 
 {@render children()}
