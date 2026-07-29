@@ -4,6 +4,22 @@ export * from './app.schema';
 import { pgTable, text, boolean, timestamp, index, serial, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { user } from './auth.schema';
+import { batch } from './app.schema';
+
+// CR access granted to an email that hasn't signed in yet. Claimed on that account's
+// first request (see hooks.server.ts), which turns these into real cr_assignment rows.
+export const pendingCr = pgTable('pending_cr', {
+	id: serial('id').primaryKey(),
+	email: text('email').notNull(),
+	batchId: text('batch_id')
+		.notNull()
+		.references(() => batch.id, { onDelete: 'cascade' }),
+	invitedBy: text('invited_by').references(() => user.id),
+	createdAt: timestamp('created_at').defaultNow().notNull()
+}, (table) => [
+	index('pending_cr_email_idx').on(table.email),
+	unique('pending_cr_email_batch_uniq').on(table.email, table.batchId)
+]);
 
 // Courses a CR has manually added to watch (searched from the timetable file).
 // courseCode is the base code, e.g. "ECE204" — components are matched by prefix.

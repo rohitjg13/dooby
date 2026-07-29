@@ -153,6 +153,28 @@
 						{/each}
 					</div>
 				{/if}
+
+				{#if data.invites.length}
+					<div class="flex flex-col gap-3 pt-2">
+						<span class="eyebrow">Invited — waiting for first sign-in ({data.invites.length})</span>
+						{#each data.invites as invite}
+							<div class="card card-pad" style="border-style: dashed;">
+								<div class="flex items-start justify-between gap-3">
+									<p class="min-w-0 truncate text-sm font-semibold" style="color: var(--fg);">{invite.email}</p>
+									<form method="POST" action="?/removeInvite" use:enhance>
+										<input type="hidden" name="email" value={invite.email} />
+										<button type="submit" class="linkbtn shrink-0">withdraw</button>
+									</form>
+								</div>
+								<div class="mt-2.5 flex flex-wrap gap-2">
+									{#each invite.batches as b}
+										<span class="badge">{b.name}</span>
+									{/each}
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
 			</section>
 		</div>
 	</main>

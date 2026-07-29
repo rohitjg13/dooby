@@ -1,7 +1,7 @@
 import { redirect, fail } from '@sveltejs/kit';
 import { eq, inArray, like, notInArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { user, batch, crAssignment } from '$lib/server/db/schema';
+import { user, batch, crAssignment, pendingCr } from '$lib/server/db/schema';
 import type { PageServerLoad, Actions } from './$types';
 import * as XLSX from 'xlsx';
 
@@ -80,7 +80,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 	// Auto-sync batches from XLSX on every load
 	await syncBatchesFromXLSX(fetch);
 
-	const [batches, crs] = await Promise.all([
+	const [batches, crs, invites] = await Promise.all([
 		db.select().from(batch).orderBy(batch.name),
 		db
 			.select({
@@ -91,8 +91,20 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 			.from(crAssignment)
 			.innerJoin(user, eq(crAssignment.userId, user.id))
 			.innerJoin(batch, eq(crAssignment.batchId, batch.id))
-			.orderBy(user.name)
+			.orderBy(user.name),
+		db
+			.select({ email: pendingCr.email, batchName: batch.name, batchId: pendingCr.batchId })
+			.from(pendingCr)
+			.innerJoin(batch, eq(pendingCr.batchId, batch.id))
+			.orderBy(pendingCr.email)
 	]);
+
+	// Group invitations by email, same shape as the CR list
+	const inviteMap = new Map<string, { email: string; batches: { id: string; name: string }[] }>();
+	for (const row of invites) {
+		if (!inviteMap.has(row.email)) inviteMap.set(row.email, { email: row.email, batches: [] });
+		inviteMap.get(row.email)!.batches.push({ id: row.batchId, name: row.batchName });
+	}
 
 	// Group CRs by user
 	const crMap = new Map<string, { user: { id: string; name: string; email: string }; batches: { id: string; name: string; assignmentId: string }[] }>();
@@ -101,7 +113,7 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 		crMap.get(row.user.id)!.batches.push({ ...row.batch, assignmentId: row.assignmentId });
 	}
 
-	return { batches, crs: [...crMap.values()] };
+	return { batches, crs: [...crMap.values()], invites: [...inviteMap.values()] };
 };
 
 export const actions: Actions = {
@@ -116,16 +128,26 @@ export const actions: Actions = {
 			return fail(400, { error: 'Email and at least one batch are required', action: 'assignCr' });
 		}
 
-		const [targetUser] = await db.select().from(user).where(eq(user.email, email)).limit(1);
-		if (!targetUser) {
-			return fail(404, {
-				error: `No account found for ${email}. The user must log in at least once.`,
-				action: 'assignCr'
-			});
-		}
-
 		const validBatches = await db.select().from(batch).where(inArray(batch.id, batchIds));
 		if (validBatches.length === 0) return fail(404, { error: 'No valid batches found', action: 'assignCr' });
+
+		const [targetUser] = await db.select().from(user).where(eq(user.email, email)).limit(1);
+
+		// No account yet — park the grant until their first sign-in claims it
+		if (!targetUser) {
+			await db
+				.insert(pendingCr)
+				.values(
+					validBatches.map((b) => ({ email, batchId: b.id, invitedBy: locals.user!.id }))
+				)
+				.onConflictDoNothing();
+			return {
+				success: true,
+				action: 'invite',
+				name: email,
+				batch: validBatches.map((b) => b.name).join(', ')
+			};
+		}
 
 		const existing = await db.select({ batchId: crAssignment.batchId }).from(crAssignment).where(eq(crAssignment.userId, targetUser.id));
 		const existingBatchIds = new Set(existing.map((r) => r.batchId));
@@ -137,6 +159,17 @@ export const actions: Actions = {
 		await db.update(user).set({ role: 'cr' }).where(eq(user.id, targetUser.id));
 
 		return { success: true, action: 'assignCr', name: targetUser.name, batch: validBatches.map((b) => b.name).join(', ') };
+	},
+
+	removeInvite: async ({ request, locals }) => {
+		if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'Forbidden' });
+
+		const data = await request.formData();
+		const email = (data.get('email') as string)?.trim().toLowerCase();
+		if (!email) return fail(400, { error: 'Invalid request', action: 'removeInvite' });
+
+		await db.delete(pendingCr).where(eq(pendingCr.email, email));
+		return { success: true, action: 'removeInvite' };
 	},
 
 	removeCr: async ({ request, locals }) => {
