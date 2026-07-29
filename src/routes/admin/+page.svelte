@@ -5,12 +5,37 @@
 
 	let showAssignCR = $state(false);
 	let selectedBatches = $state<Set<string>>(new Set());
+	let batchFilter = $state('');
+
+	// Editing an existing CR's batches — one card at a time
+	let editingCr = $state<string | null>(null);
+	let editBatches = $state<Set<string>>(new Set());
+	let editFilter = $state('');
 
 	function toggleBatch(id: string) {
 		const next = new Set(selectedBatches);
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
 		selectedBatches = next;
+	}
+
+	function startEdit(cr: { user: { id: string }; batches: { id: string }[] }) {
+		editingCr = cr.user.id;
+		editBatches = new Set(cr.batches.map((b) => b.id));
+		editFilter = '';
+	}
+
+	function toggleEditBatch(id: string) {
+		const next = new Set(editBatches);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		editBatches = next;
+	}
+
+	// 160+ batches in the file, so both pickers filter
+	function matchBatches(all: { id: string; name: string }[], q: string) {
+		const needle = q.trim().toUpperCase();
+		return needle ? all.filter((b) => b.name.toUpperCase().includes(needle)) : all;
 	}
 </script>
 
@@ -42,9 +67,17 @@
 			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--ok);">
 				<span>✓</span>
 				{#if form.action === 'assignCr'}
-					{form.name} is now CR of {form.batch}
+					Added CR — {form.name} now manages {form.batch}
+				{:else if form.action === 'invite'}
+					Invited {form.name} — they become CR of {form.batch} the first time they sign in
+				{:else if form.action === 'setCrBatches'}
+					{form.batch ? `Updated ${form.name} — now manages ${form.batch}` : `${form.name} no longer manages any batch`}
+				{:else if form.action === 'removeInvite'}
+					Invitation withdrawn
 				{:else if form.action === 'removeCr'}
 					CR assignment removed
+				{:else}
+					Saved
 				{/if}
 			</div>
 		{/if}
@@ -70,7 +103,7 @@
 						class="card card-pad flex flex-col gap-5"
 					>
 						<div class="flex flex-col">
-							<label for="cr-email" class="field-label">Student email</label>
+							<label for="cr-email" class="field-label">Email <span style="color: var(--muted); font-weight: 400;">— an account isn't needed yet</span></label>
 							<input
 								id="cr-email"
 								name="email"
@@ -89,11 +122,19 @@
 							{#if data.batches.length === 0}
 								<p class="hint">No batches found in the timetable file.</p>
 							{:else}
-								<div class="flex flex-wrap gap-2">
-									{#each data.batches as b}
-										{#if selectedBatches.has(b.id)}
-											<input type="hidden" name="batchIds" value={b.id} />
-										{/if}
+								<input
+									bind:value={batchFilter}
+									placeholder="filter batches"
+									autocomplete="off"
+									class="input nood-mono uppercase"
+									style="font-size: 0.8rem; padding: 0.5rem 0.7rem;"
+								/>
+								<!-- Hidden inputs cover every selection, including ones the filter hides -->
+								{#each [...selectedBatches] as id}
+									<input type="hidden" name="batchIds" value={id} />
+								{/each}
+								<div class="flex flex-wrap gap-2" style="max-height: 13rem; overflow-y: auto;">
+									{#each matchBatches(data.batches, batchFilter) as b}
 										<button
 											type="button"
 											onclick={() => toggleBatch(b.id)}
@@ -130,7 +171,7 @@
 							<div class="card card-pad">
 								<p class="text-base font-semibold" style="color: var(--fg);">{cr.user.name}</p>
 								<p class="mt-0.5 text-sm" style="color: var(--muted);">{cr.user.email}</p>
-								<div class="mt-3 flex flex-wrap gap-2">
+								<div class="mt-3 flex flex-wrap items-center gap-2">
 									{#each cr.batches as b}
 										<span class="badge" style="color: var(--fg);">
 											{b.name}
@@ -148,7 +189,48 @@
 											</form>
 										</span>
 									{/each}
+									{#if editingCr !== cr.user.id}
+										<button onclick={() => startEdit(cr)} class="linkbtn">edit batches</button>
+									{/if}
 								</div>
+
+								{#if editingCr === cr.user.id}
+									<form
+										method="POST"
+										action="?/setCrBatches"
+										use:enhance={() => ({ update }) => { update(); editingCr = null; }}
+										class="mt-3 flex flex-col gap-2.5 pt-3"
+										style="border-top: 1px solid var(--border);"
+									>
+										<input type="hidden" name="userId" value={cr.user.id} />
+										{#each [...editBatches] as id}
+											<input type="hidden" name="batchIds" value={id} />
+										{/each}
+										<input
+											bind:value={editFilter}
+											placeholder="filter batches"
+											autocomplete="off"
+											class="input nood-mono uppercase"
+											style="font-size: 0.8rem; padding: 0.5rem 0.7rem;"
+										/>
+										<div class="flex flex-wrap gap-2" style="max-height: 11rem; overflow-y: auto;">
+											{#each matchBatches(data.batches, editFilter) as b}
+												<button
+													type="button"
+													onclick={() => toggleEditBatch(b.id)}
+													class="chip {editBatches.has(b.id) ? 'chip-active' : ''}"
+													aria-pressed={editBatches.has(b.id)}
+												>{b.name}</button>
+											{/each}
+										</div>
+										<div class="flex items-center gap-3">
+											<p class="hint">{editBatches.size} selected{editBatches.size === 0 ? ' — saving none removes their CR access' : ''}</p>
+											<div class="flex-1"></div>
+											<button type="button" onclick={() => editingCr = null} class="btn btn-ghost btn-sm">cancel</button>
+											<button type="submit" class="btn btn-primary btn-sm">save batches</button>
+										</div>
+									</form>
+								{/if}
 							</div>
 						{/each}
 					</div>

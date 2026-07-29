@@ -172,6 +172,53 @@ export const actions: Actions = {
 		return { success: true, action: 'removeInvite' };
 	},
 
+	setCrBatches: async ({ request, locals }) => {
+		if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'Forbidden' });
+
+		const data = await request.formData();
+		const userId = data.get('userId') as string;
+		const batchIds = data.getAll('batchIds') as string[];
+		if (!userId) return fail(400, { error: 'Invalid request', action: 'setCrBatches' });
+
+		const [targetUser] = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+		if (!targetUser) return fail(404, { error: 'That account no longer exists', action: 'setCrBatches' });
+
+		const valid = batchIds.length
+			? await db.select().from(batch).where(inArray(batch.id, batchIds))
+			: [];
+		const wanted = new Set(valid.map((b) => b.id));
+
+		const current = await db
+			.select({ id: crAssignment.id, batchId: crAssignment.batchId })
+			.from(crAssignment)
+			.where(eq(crAssignment.userId, userId));
+		const held = new Set(current.map((r) => r.batchId));
+
+		const toAdd = [...wanted].filter((id) => !held.has(id));
+		const toDrop = current.filter((r) => !wanted.has(r.batchId)).map((r) => r.id);
+
+		if (toAdd.length) {
+			await db
+				.insert(crAssignment)
+				.values(toAdd.map((batchId) => ({ id: crypto.randomUUID(), userId, batchId })));
+		}
+		if (toDrop.length) {
+			await db.delete(crAssignment).where(inArray(crAssignment.id, toDrop));
+		}
+		// No batches left means no CR duties left
+		await db
+			.update(user)
+			.set({ role: wanted.size === 0 ? 'pending' : 'cr' })
+			.where(eq(user.id, userId));
+
+		return {
+			success: true,
+			action: 'setCrBatches',
+			name: targetUser.name,
+			batch: valid.map((b) => b.name).join(', ')
+		};
+	},
+
 	removeCr: async ({ request, locals }) => {
 		if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'Forbidden' });
 
