@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { user, batch, crAssignment, pendingCr } from '$lib/server/db/schema';
 import type { PageServerLoad, Actions } from './$types';
 import * as XLSX from 'xlsx';
+import { expandBlocks } from '$lib/types';
 
 const dataFiles = import.meta.glob('$lib/data/*.{xlsx,xls,csv}', {
 	query: '?url',
@@ -32,18 +33,10 @@ async function syncBatchesFromXLSX(fetchFn: typeof fetch): Promise<void> {
 
 	const batchSet = new Set<string>();
 	for (const row of jsonData) {
-		const keys = ['Batch', 'Major', 'Batches', 'Program'];
-		for (const key of keys) {
+		// Programme = year-level cohort, Student Block = the sub-block; both are batches
+		for (const key of ['Programme', 'Student Block', 'Batch', 'Major', 'Batches']) {
 			const val = row[key];
-			if (val && String(val).trim() && String(val).trim() !== '-') {
-				// Split by whitespace and/or commas — handles "ELC21 ELC22 ELC23 ELC24" and "CSE-A, CSE-B"
-				String(val)
-					.split(/[\s,]+/)
-					.map((s) => s.trim())
-					.filter((s) => s && s !== '-')
-					.forEach((b) => batchSet.add(b));
-				break;
-			}
+			if (val) expandBlocks(String(val)).forEach((b) => batchSet.add(b));
 		}
 	}
 

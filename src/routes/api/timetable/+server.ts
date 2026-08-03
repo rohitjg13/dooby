@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import * as XLSX from 'xlsx';
-import type { Course } from '$lib/types';
+import { expandBlocks, type Course } from '$lib/types';
 
 const dataFiles = import.meta.glob('$lib/data/*.{xlsx,xls,csv}', {
 	query: '?url',
@@ -79,15 +79,22 @@ function parseData(jsonData: Record<string, unknown>[]): Course[] {
 			if (section) fullCode = `${courseCode}-${section}`;
 			else if (component) fullCode = `${courseCode}-${component}`;
 
+			// Programme (BIO2YR) and Student Block (BIO21, "ECE21 to ECE215") are separate
+			// columns; downstream code wants one space-separated batch string.
+			const major = [
+				...expandBlocks(getValue(['Programme'])),
+				...expandBlocks(getValue(['Student Block']))
+			];
+
 			return {
 				sno: index + 1,
 				courseCode: fullCode,
-				courseName: getValue(['Course Name', 'CourseName', 'Name', 'Title']),
+				courseName: getValue(['Course Title', 'Course Name', 'CourseName', 'Name', 'Title']),
 				credits: getNum(['L/T/P Hour']),
-				faculty: getValue(['Faculty', 'Instructor', 'Teacher', 'Professor']),
+				faculty: getValue(['Instructor(s)', 'Faculty', 'Instructor', 'Teacher', 'Professor']),
 				slot: section,
 				room: getValue(['Room', 'Venue', 'Location', 'Classroom', 'Rooms']),
-				major: getValue(['Batch', 'Major', 'Batches', 'Program']),
+				major: [...new Set(major)].join(' ') || getValue(['Batch', 'Major', 'Batches']),
 				day: getValue(['Day', 'Days', 'Weekday']),
 				startTime: getValue(['Start Time', 'StartTime', 'Start', 'From']),
 				endTime: getValue(['End Time', 'EndTime', 'End', 'To']),
@@ -95,7 +102,7 @@ function parseData(jsonData: Record<string, unknown>[]): Course[] {
 				component,
 				openAsUWE:
 					openAsUWEVal.toLowerCase() === 'yes' || openAsUWEVal.toLowerCase() === 'true',
-				remarks: getValue(['Remarks'])
+				remarks: getValue(['Scheduling Note', 'Remarks', 'Class Notes'])
 			};
 		})
 		.filter((c) => c.courseCode && c.courseCode !== '-');

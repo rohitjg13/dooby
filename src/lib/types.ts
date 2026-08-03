@@ -17,7 +17,25 @@ export interface Course {
 	remarks?: string;
 }
 
-export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// Student blocks arrive as "ECE21 to ECE215" / "CSD37 to CSD311" — letters + year digit
+// are the base, the rest is the block index. Returns the expanded tokens.
+export function expandBlocks(raw: string): string[] {
+	if (!raw) return [];
+	const expanded = raw.replace(
+		/([A-Za-z]+\d)(\d+)\s*to\s*\1(\d+)/gi,
+		(_m, base: string, from: string, to: string) => {
+			const out: string[] = [];
+			for (let i = parseInt(from); i <= parseInt(to); i++) out.push(base + i);
+			return out.join(' ');
+		}
+	);
+	return expanded
+		.split(/[\s,]+/)
+		.map((s) => s.trim())
+		.filter((s) => s && s !== '-');
+}
+
+export const DAYS =['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const DAY_ABBREV: Record<string, string[]> = {
 	M: ['Monday'],
