@@ -1,50 +1,47 @@
-import { json } from '@sveltejs/kit';
+import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { crCourse } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
-
-function canManage(user: App.Locals['user']) {
-	return user?.role === 'cr' || user?.role === 'admin';
-}
+import { readJson, requireManager, str } from '$lib/server/api';
+import { courseNames } from '$lib/server/timetable';
 
 // GET /api/cr/courses — the signed-in CR's watched courses
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!canManage(locals.user)) return json({ error: 'Forbidden' }, { status: 403 });
+	const user = requireManager(locals);
 	const courses = await db
-		.select()
+		.select({ courseCode: crCourse.courseCode, courseName: crCourse.courseName })
 		.from(crCourse)
-		.where(eq(crCourse.userId, locals.user!.id))
+		.where(eq(crCourse.userId, user.id))
 		.orderBy(crCourse.courseCode);
 	return json({ courses });
 };
 
-// POST /api/cr/courses — add one course by base code
+// POST /api/cr/courses — add one course by base code. Only codes that exist in the
+// timetable are accepted, and the stored title is the sheet's, not the client's.
 export const POST: RequestHandler = async ({ locals, request }) => {
-	if (!canManage(locals.user)) return json({ error: 'Forbidden' }, { status: 403 });
+	const user = requireManager(locals);
 
-	const { courseCode, courseName } = await request.json();
-	const code = String(courseCode ?? '').trim().toUpperCase();
-	if (!code) return json({ error: 'courseCode required' }, { status: 400 });
+	const code = str((await readJson(request)).courseCode, 64).toUpperCase();
+	const courseName = courseNames.get(code);
+	if (courseName === undefined) error(400, 'Unknown course code');
 
-	const [row] = await db
+	// Adding a course you already track is still success
+	await db
 		.insert(crCourse)
-		.values({ userId: locals.user!.id, courseCode: code, courseName: courseName ?? null })
-		.onConflictDoNothing()
-		.returning();
+		.values({ userId: user.id, courseCode: code, courseName })
+		.onConflictDoNothing();
 
-	// onConflictDoNothing returns nothing when the CR already had it — that's still success
-	return json({ course: row ?? { courseCode: code, courseName: courseName ?? null } });
+	return json({ course: { courseCode: code, courseName } });
 };
 
 // DELETE /api/cr/courses — remove one course by base code
 export const DELETE: RequestHandler = async ({ locals, request }) => {
-	if (!canManage(locals.user)) return json({ error: 'Forbidden' }, { status: 403 });
+	const user = requireManager(locals);
 
-	const { courseCode } = await request.json();
-	const code = String(courseCode ?? '').trim().toUpperCase();
-	if (!code) return json({ error: 'courseCode required' }, { status: 400 });
+	const code = str((await readJson(request)).courseCode, 64).toUpperCase();
+	if (!code) error(400, 'courseCode required');
 
-	await db.delete(crCourse).where(and(eq(crCourse.userId, locals.user!.id), eq(crCourse.courseCode, code)));
+	await db.delete(crCourse).where(and(eq(crCourse.userId, user.id), eq(crCourse.courseCode, code)));
 	return json({ success: true });
 };

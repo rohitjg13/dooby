@@ -48,7 +48,9 @@
 		</a>
 		<div class="flex items-center gap-3">
 			<a href="/" class="linkbtn no-underline">← back</a>
-			<a href="/auth/signout" class="linkbtn no-underline">sign out</a>
+			<form method="POST" action="/auth/signout" class="contents">
+				<button type="submit" class="linkbtn">sign out</button>
+			</form>
 		</div>
 	</header>
 
@@ -154,7 +156,7 @@
 						</button>
 					</form>
 				{:else}
-					<p class="hint">Click <span style="color: var(--fg); font-weight: 600;">+ assign CR</span> to give an account class-rep access for their batches. They must have signed in at least once.</p>
+					<p class="hint">Click <span style="color: var(--fg); font-weight: 600;">+ assign CR</span> to give an account class-rep access for their batches. If they haven't signed in yet, the access is waiting for them when they do.</p>
 				{/if}
 			</section>
 
@@ -177,7 +179,6 @@
 											{b.name}
 											<form method="POST" action="?/removeCr" use:enhance class="inline">
 												<input type="hidden" name="assignmentId" value={b.assignmentId} />
-												<input type="hidden" name="userId" value={cr.user.id} />
 												<button
 													type="submit"
 													class="cursor-pointer border-none bg-transparent text-base leading-none transition-colors duration-200"

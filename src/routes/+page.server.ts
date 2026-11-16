@@ -1,26 +1,26 @@
 import { redirect } from '@sveltejs/kit';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, count } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { crAssignment, batch, crCourse, scheduleBlock, notification } from '$lib/server/db/schema';
+import { crAssignment, batch, crCourse, scheduleBlock, notification, professorConstraint } from '$lib/server/db/schema';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
 
-	const user = locals.user;
+	// Only what the page renders — the session row's timestamps and flags stay server-side
+	const { id, name, email, role } = locals.user;
+	const user = { id, name, email, role };
 	const canManage = user.role === 'cr' || user.role === 'admin';
 
 	// Users who signed in but haven't been made a CR yet see the waiting screen
 	if (!canManage) {
-		return { user, crBatches: [], myCourses: [], savedSchedule: [], notifications: [], watchCounts: [] };
+		return { user, crBatches: [], myCourses: [], savedSchedule: [], constraints: [], notifications: [], watchCounts: [] };
 	}
 
-	const [batchResult, myCourses, scheduleResult, notifResult, othersWatching] = await Promise.all([
+	const [batchResult, myCourses, scheduleResult, notifResult, watchCounts, constraints] = await Promise.all([
 		db
 			.select({
-				id: crAssignment.id,
-				assignedAt: crAssignment.assignedAt,
-				batch: { id: batch.id, name: batch.name, description: batch.description }
+				batch: { id: batch.id, name: batch.name }
 			})
 			.from(crAssignment)
 			.innerJoin(batch, eq(crAssignment.batchId, batch.id))
@@ -51,12 +51,25 @@ export const load: PageServerLoad = async ({ locals }) => {
 			.from(notification)
 			.where(and(eq(notification.toUserId, user.id), eq(notification.dismissed, false)))
 			.orderBy(notification.createdAt),
-		// Which courses other CRs watch — drives the "heads up" modal before a move
-		db.select({ courseCode: crCourse.courseCode }).from(crCourse).where(ne(crCourse.userId, user.id))
+		// How many other CRs watch each course — drives the "heads up" modal before a move
+		db
+			.select({ code: crCourse.courseCode, count: count() })
+			.from(crCourse)
+			.where(ne(crCourse.userId, user.id))
+			.groupBy(crCourse.courseCode),
+		db
+			.select({
+				id: professorConstraint.id,
+				professorName: professorConstraint.professorName,
+				day: professorConstraint.day,
+				startTime: professorConstraint.startTime,
+				endTime: professorConstraint.endTime,
+				allDay: professorConstraint.allDay,
+				reason: professorConstraint.reason
+			})
+			.from(professorConstraint)
+			.orderBy(professorConstraint.id)
 	]);
-
-	const counts = new Map<string, number>();
-	for (const row of othersWatching) counts.set(row.courseCode, (counts.get(row.courseCode) ?? 0) + 1);
 
 	return {
 		user,
@@ -64,6 +77,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		myCourses,
 		savedSchedule: scheduleResult,
 		notifications: notifResult.map((n) => ({ ...n, createdAt: n.createdAt.getTime() })),
-		watchCounts: [...counts.entries()].map(([code, count]) => ({ code, count }))
+		constraints,
+		watchCounts
 	};
 };
